@@ -16,6 +16,7 @@ import json
 import os
 import re
 import shutil
+import ssl
 import struct
 import subprocess
 import sys
@@ -155,11 +156,28 @@ USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36
 CHUNK_BYTES = 8 * 1024 * 1024
 
 
+def _ssl_context():
+    """python.org builds of Python ship without CA certificates on macOS, so
+    point them at certifi or the system bundle instead of the empty default."""
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        pass
+    for bundle in ("/etc/ssl/cert.pem", "/opt/homebrew/etc/ca-certificates/cert.pem", "/usr/local/etc/ca-certificates/cert.pem"):
+        if os.path.exists(bundle):
+            return ssl.create_default_context(cafile=bundle)
+    return ssl.create_default_context()
+
+
+SSL_CONTEXT = _ssl_context()
+
+
 def _open(url, referer):
     headers = {"User-Agent": USER_AGENT}
     if referer:
         headers["Referer"] = referer
-    return urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=60)
+    return urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=60, context=SSL_CONTEXT)
 
 
 def _copy(response, out, on_bytes):
