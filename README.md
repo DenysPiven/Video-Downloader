@@ -17,10 +17,12 @@ Everything runs inside Chrome, so your site logins and any browser VPN keep work
 
 ## Installation
 
-1. Get the repository (`git clone`, or **Code → Download ZIP** and unzip it).
+1. Download `video-downloader-<version>.zip` from the [latest release](https://github.com/DenysPiven/Video-Downloader/releases/latest) and unzip it to a folder you'll keep (Chrome loads the extension from there).
 2. Open `chrome://extensions` and turn on **Developer mode** in the top-right corner.
-3. Click **Load unpacked** and select the repository folder.
+3. Click **Load unpacked** and select the unzipped `video-downloader` folder.
 4. Pin the extension icon to the toolbar.
+
+To update, replace the folder's contents with a newer release and click the reload button on the extension's card. You can also `git clone` the repository and load that folder instead.
 
 ## yt-dlp helper (optional)
 
