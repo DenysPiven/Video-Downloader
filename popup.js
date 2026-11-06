@@ -1,6 +1,7 @@
 import { safeName, extFromUrl, formatSize } from "./util.js";
 
-const DEFAULTS = { subfolder: "video-downloader" };
+const DEFAULTS = { subfolder: "Video Downloader" };
+const OLD_DEFAULT_FOLDER = "video-downloader";
 const $ = (id) => document.getElementById(id);
 
 let items = []; // { checkbox, nameEl, kind, url, ext, site, title }
@@ -21,6 +22,7 @@ function el(tag, props = {}, children = []) {
 
 async function loadSettings() {
   settings = { ...DEFAULTS, ...(await chrome.storage.local.get(Object.keys(DEFAULTS))) };
+  if (settings.subfolder === OLD_DEFAULT_FOLDER) saveSetting("subfolder", DEFAULTS.subfolder);
   $("folder").value = settings.subfolder;
 }
 

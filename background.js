@@ -132,7 +132,7 @@ async function getJob(id) {
   return jobs.find((j) => j.id === id);
 }
 
-// path is relative to Downloads, e.g. "video-downloader/Show - 3 episode.mp4"
+// path is relative to Downloads, e.g. "Video Downloader/Show - 3 episode.mp4"
 async function alreadyDownloaded(path) {
   const found = await chrome.downloads.search({
     filenameRegex: `[\\\\/]${escapeRe(path).replace(/\//g, "[\\\\/]")}$`,
