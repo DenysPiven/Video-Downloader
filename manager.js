@@ -1,11 +1,13 @@
-// Download manager tab: takes jobs queued by the popup and writes them straight
-// into a folder the user picked (File System Access API). HLS streams are
-// fetched segment by segment and written in order, so memory use stays small.
+// Download manager tab: takes jobs queued by the popup and saves them.
+// Default target is Downloads/video-downloader via Chrome's download manager.
+// Optionally the user picks any folder; then files are written straight into it
+// (File System Access API) and HLS streams are written to disk in order.
 
 import { idbGet, idbSet } from "./store.js";
 import { isMaster, parseMaster, parseMedia } from "./hls-parse.js";
 import { formatSize } from "./util.js";
 
+const DEFAULT_DIR = "video-downloader";
 const MAX_PARALLEL_JOBS = 2;
 const SEGMENT_CONCURRENCY = 6;
 const SEGMENT_WINDOW = 24; // max segments buffered ahead of the writer
@@ -13,24 +15,24 @@ const RETRIES = 4;
 
 const $ = (id) => document.getElementById(id);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-let dir = null;          // FileSystemDirectoryHandle
-let permitted = false;
+let dir = null;          // FileSystemDirectoryHandle, or null for Downloads/video-downloader
+let permitted = true;
 let running = 0;
-const jobs = [];         // { id, url, kind, name, state, el, ... }
+const jobs = [];         // { id, url, kind, name, site, state, el }
 
-// ---------- Folder ----------
+// ---------- Target folder ----------
 
 async function loadFolder() {
   dir = (await idbGet("dir")) || null;
-  if (!dir) return renderFolder();
-  permitted = (await dir.queryPermission({ mode: "readwrite" })) === "granted";
+  permitted = !dir || (await dir.queryPermission({ mode: "readwrite" })) === "granted";
   renderFolder();
 }
 
 async function chooseFolder() {
   try {
-    const handle = await window.showDirectoryPicker({ id: "video-downloader", mode: "readwrite", startIn: "videos" });
+    const handle = await window.showDirectoryPicker({ id: "video-downloader", mode: "readwrite", startIn: "downloads" });
     dir = handle;
     permitted = true;
     await idbSet("dir", handle);
@@ -42,6 +44,15 @@ async function chooseFolder() {
   }
 }
 
+async function useDownloads() {
+  dir = null;
+  permitted = true;
+  await idbSet("dir", null);
+  await chrome.storage.local.remove("folderName");
+  renderFolder();
+  pump();
+}
+
 async function allowAccess() {
   permitted = (await dir.requestPermission({ mode: "readwrite" })) === "granted";
   renderFolder();
@@ -49,14 +60,10 @@ async function allowAccess() {
 }
 
 function renderFolder() {
-  $("folder").textContent = dir ? dir.name : "No folder chosen";
-  $("folder").classList.toggle("none", !dir);
-  $("choose").textContent = dir ? "Change" : "Choose folder";
-  $("choose").className = dir ? "ghost" : "";
-
+  $("folder").textContent = dir ? dir.name : `Downloads/${DEFAULT_DIR}`;
+  $("reset").hidden = !dir;
   const waiting = jobs.some((j) => j.state === "queued");
-  if (!dir && waiting) showBanner("Choose where to save the videos.", "Choose folder", chooseFolder);
-  else if (dir && !permitted && waiting) showBanner(`Allow access to “${dir.name}” to start.`, "Allow", allowAccess);
+  if (dir && !permitted && waiting) showBanner(`Allow access to “${dir.name}” to start.`, "Allow", allowAccess);
   else hideBanner();
 }
 
@@ -81,9 +88,10 @@ async function takeQueued() {
 
 function addJob(item) {
   const el = document.createElement("li");
-  el.innerHTML = `<div class="job-top"><span class="job-name"></span><span class="job-state">Queued</span></div><div class="bar"><i></i></div><div class="job-note"></div>`;
+  el.innerHTML = `<div class="job-top"><span class="job-name"></span><span class="job-state">Queued</span></div><div class="job-site"></div><div class="bar"><i></i></div><div class="job-note"></div>`;
   el.querySelector(".job-name").textContent = item.name;
   el.querySelector(".job-name").title = item.url;
+  el.querySelector(".job-site").textContent = item.site ? `from ${item.site}` : "";
   $("jobs").append(el);
   jobs.push({ ...item, state: "queued", el });
   renderSummary();
@@ -122,7 +130,7 @@ function renderSummary() {
 }
 
 function pump() {
-  if (!dir || !permitted) return;
+  if (!permitted) return;
   while (running < MAX_PARALLEL_JOBS) {
     const job = jobs.find((j) => j.state === "queued");
     if (!job) break;
@@ -137,20 +145,20 @@ function pump() {
 function fail(job, e) {
   const note = document.createElement("span");
   note.append(`${e.message} `);
-  if (job.kind === "file") {
-    const retry = Object.assign(document.createElement("button"), { className: "link", textContent: "Save via Chrome downloads instead" });
+  if (job.kind === "file" && dir) {
+    const retry = Object.assign(document.createElement("button"), { className: "link", textContent: "Save to Downloads instead" });
     retry.onclick = () => {
-      chrome.downloads.download({ url: job.url, filename: job.name, conflictAction: "uniquify" });
-      setJob(job, { note: "Sent to Chrome downloads (your Downloads folder)." });
+      chrome.downloads.download({ url: job.url, filename: `${DEFAULT_DIR}/${job.name}`, conflictAction: "uniquify" });
+      setJob(job, { note: `Sent to Chrome downloads (Downloads/${DEFAULT_DIR}).` });
     };
     note.append(retry);
   }
   setJob(job, { state: "failed", text: "Failed", cls: "err", note });
 }
 
-// ---------- Writing ----------
+// ---------- Targets ----------
 
-async function exists(name) {
+async function existsInFolder(name) {
   try {
     const file = await (await dir.getFileHandle(name)).getFile();
     return file.size > 0;
@@ -159,37 +167,72 @@ async function exists(name) {
   }
 }
 
+async function existsInDownloads(name) {
+  const found = await chrome.downloads.search({
+    filenameRegex: `[\\\\/]${escapeRe(DEFAULT_DIR)}[\\\\/]${escapeRe(name)}$`,
+    state: "complete",
+    exists: true,
+  });
+  return found.length > 0;
+}
+
+async function alreadySaved(job, name) {
+  if (!$("skip").checked) return false;
+  const found = dir ? await existsInFolder(name) : await existsInDownloads(name);
+  if (found) setJob(job, { state: "skipped", text: "Already saved", progress: 1, cls: "ok" });
+  return found;
+}
+
 async function freeName(name) {
-  if (!(await exists(name))) return name;
+  if (!(await existsInFolder(name))) return name;
   const dot = name.lastIndexOf(".");
   const [stem, ext] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, ""];
   for (let i = 2; ; i++) {
     const candidate = `${stem} (${i})${ext}`;
-    if (!(await exists(candidate))) return candidate;
+    if (!(await existsInFolder(candidate))) return candidate;
   }
 }
 
-// Returns a writable for the final file name, or null when skipped.
-async function openTarget(job, name) {
-  if ($("skip").checked && (await exists(name))) {
-    setJob(job, { state: "skipped", text: "Already in folder", progress: 1, cls: "ok" });
-    return null;
-  }
+async function folderWritable(job, name) {
   const finalName = await freeName(name);
   if (finalName !== name) setJob(job, { note: `Saved as “${finalName}”.` });
   const handle = await dir.getFileHandle(finalName, { create: true });
   return handle.createWritable(); // Chrome writes to a temp file and swaps on close
 }
 
+// Waits for a Chrome download to finish, reporting progress on the job.
+async function trackDownload(job, id) {
+  for (;;) {
+    const [d] = await chrome.downloads.search({ id });
+    if (!d) throw new Error("The download was removed.");
+    if (d.state === "complete") return d;
+    if (d.state === "interrupted") throw new Error(`Download interrupted (${d.error}).`);
+    const total = d.totalBytes > 0 ? d.totalBytes : 0;
+    setJob(job, {
+      text: total ? `${Math.floor((d.bytesReceived / total) * 100)}% · ${formatSize(d.bytesReceived)} of ${formatSize(total)}` : formatSize(d.bytesReceived),
+      progress: total ? d.bytesReceived / total : 0,
+    });
+    await sleep(500);
+  }
+}
+
+// ---------- Direct files ----------
+
 async function runJob(job) {
   if (job.kind === "hls") return runHls(job);
+  if (await alreadySaved(job, job.name)) return;
+
+  if (!dir) {
+    const id = await chrome.downloads.download({ url: job.url, filename: `${DEFAULT_DIR}/${job.name}`, conflictAction: "uniquify" });
+    const d = await trackDownload(job, id);
+    setJob(job, { state: "done", text: `Done · ${formatSize(d.fileSize || d.bytesReceived)}`, progress: 1, cls: "ok" });
+    return;
+  }
 
   const res = await fetch(job.url, { credentials: "include" });
   if (!res.ok) throw new Error(`HTTP ${res.status}.`);
   const total = Number(res.headers.get("content-length")) || 0;
-
-  const writable = await openTarget(job, job.name);
-  if (!writable) { res.body?.cancel(); return; }
+  const writable = await folderWritable(job, job.name);
 
   let loaded = 0;
   let last = 0;
@@ -233,6 +276,26 @@ async function getBytes({ url, range }) {
   }
 }
 
+// Where HLS bytes go: straight to a file in the chosen folder, or collected in
+// memory and handed to Chrome's downloads at the end.
+async function hlsSink(job, name, type) {
+  if (dir) return folderWritable(job, name);
+  const parts = [];
+  return {
+    write: async (chunk) => { parts.push(chunk); },
+    abort: async () => { parts.length = 0; },
+    close: async () => {
+      const blobUrl = URL.createObjectURL(new Blob(parts, { type }));
+      try {
+        const id = await chrome.downloads.download({ url: blobUrl, filename: `${DEFAULT_DIR}/${name}`, conflictAction: "uniquify" });
+        await trackDownload(job, id);
+      } finally {
+        URL.revokeObjectURL(blobUrl);
+      }
+    },
+  };
+}
+
 async function runHls(job) {
   let url = job.url;
   let text = await getText(url);
@@ -255,14 +318,15 @@ async function runHls(job) {
   if (warnings.length) setJob(job, { note: warnings.join(" ") });
 
   const ext = init ? "mp4" : "ts";
-  const writable = await openTarget(job, `${job.name}.${ext}`);
-  if (!writable) return;
+  const name = `${job.name}.${ext}`;
+  if (await alreadySaved(job, name)) return;
+  const sink = await hlsSink(job, name, init ? "video/mp4" : "video/mp2t");
 
   let next = 0, written = 0, bytes = 0, error = null;
   const ready = new Map();
 
   try {
-    if (init) await writable.write(await getBytes(init));
+    if (init) await sink.write(await getBytes(init));
 
     const fetcher = async () => {
       while (!error && next < segments.length) {
@@ -276,7 +340,7 @@ async function runHls(job) {
         if (!ready.has(written)) { await sleep(25); continue; }
         const chunk = ready.get(written);
         ready.delete(written);
-        await writable.write(chunk);
+        await sink.write(chunk);
         bytes += chunk.byteLength;
         written++;
         setJob(job, {
@@ -288,20 +352,23 @@ async function runHls(job) {
 
     await Promise.all([writer(), ...Array.from({ length: SEGMENT_CONCURRENCY }, fetcher)]);
     if (error) throw error;
-    await writable.close();
+    setJob(job, { text: "Saving…" });
+    await sink.close();
   } catch (e) {
-    await writable.abort().catch(() => {});
+    await sink.abort().catch(() => {});
     throw e;
   }
 
-  const tip = ext === "ts" ? " .ts plays in VLC or IINA; convert with: ffmpeg -i video.ts -c copy video.mp4" : "";
   setJob(job, { state: "done", text: `Done · ${formatSize(bytes)}`, progress: 1, cls: "ok" });
-  if (tip) setJob(job, { note: (warnings.join(" ") + tip).trim() });
+  if (ext === "ts") {
+    setJob(job, { note: `${warnings.join(" ")} .ts plays in VLC or IINA; convert with: ffmpeg -i video.ts -c copy video.mp4`.trim() });
+  }
 }
 
 // ---------- Init ----------
 
 $("choose").addEventListener("click", chooseFolder);
+$("reset").addEventListener("click", useDownloads);
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "session" && changes.queue?.newValue?.length) takeQueued();
 });

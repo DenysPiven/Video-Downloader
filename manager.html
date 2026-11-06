@@ -31,6 +31,7 @@
     .job-name { flex: 1; min-width: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .job-state { color: var(--muted); font-size: 12px; white-space: nowrap; }
     .job-state.ok { color: var(--ok); } .job-state.err { color: var(--err); }
+    .job-site { margin-top: 2px; color: var(--muted); font-size: 12px; }
     .bar { height: 3px; margin-top: 10px; background: var(--line); border-radius: 2px; overflow: hidden; }
     .bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .4s ease; }
     @media (prefers-color-scheme: light) { .bar > i { background: var(--fg); } }
@@ -53,8 +54,9 @@
 
     <section class="folder">
       <span class="label">Save to</span>
-      <span class="path none" id="folder">No folder chosen</span>
-      <button id="choose">Choose folder</button>
+      <span class="path" id="folder">Downloads/video-downloader</span>
+      <button id="reset" class="ghost" hidden>Use Downloads</button>
+      <button id="choose" class="ghost">Choose folder</button>
     </section>
     <label class="opts"><input type="checkbox" id="skip" checked> Skip files that already exist in the folder</label>
 

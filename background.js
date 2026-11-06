@@ -7,9 +7,9 @@ const HLS_EXT = /\.m3u8$/i;
 const MIN_FILE_BYTES = 300 * 1024; // smaller "videos" are previews/ads/segments
 const MAX_PER_TAB = 60;
 
-// Sites whose streams are split into many signed range requests and can't be
-// saved as one file this way.
-const SKIP_HOSTS = /(^|\.)googlevideo\.com$/i;
+// Players that fetch a file in byte-range chunks via a query parameter
+// (e.g. ?range=0-65535) produce fragments, not whole files.
+const CHUNK_QUERY = /[?&](range|bytes)=\d+-\d*/i;
 
 const key = (tabId) => `tab_${tabId}`;
 let queue = Promise.resolve(); // serialize storage writes
@@ -32,7 +32,7 @@ function totalSize(h) {
 function classify(details) {
   let u;
   try { u = new URL(details.url); } catch { return null; }
-  if (!/^https?:$/.test(u.protocol) || SKIP_HOSTS.test(u.hostname)) return null;
+  if (!/^https?:$/.test(u.protocol) || CHUNK_QUERY.test(u.search)) return null;
 
   const h = headerMap(details.responseHeaders);
   const ct = (h["content-type"] || "").split(";")[0].trim().toLowerCase();
