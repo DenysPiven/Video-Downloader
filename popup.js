@@ -1,7 +1,7 @@
 import { QUALITIES, QUALITY_LABELS, parseBoostyPost, loadBoostyPosts } from "./boosty.js";
 import { safeName, extFromUrl, formatSize } from "./util.js";
 
-const ROOT = "Video Saver";
+const ROOT = "Video Downloader";
 const $ = (id) => document.getElementById(id);
 let items = []; // { checkbox, stateEl, getUrl(), kind, filename }
 

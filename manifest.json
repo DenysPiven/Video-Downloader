@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Video Saver",
+  "name": "Video Downloader",
   "version": "2.0.0",
   "description": "Finds videos on a page (MP4, WebM, HLS) and downloads them. Includes a Boosty mode.",
   "permissions": ["tabs", "downloads", "webRequest", "scripting", "storage", "cookies"],
@@ -8,6 +8,6 @@
   "background": { "service_worker": "background.js" },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Video Saver"
+    "default_title": "Video Downloader"
   }
 }

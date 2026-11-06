@@ -8,7 +8,7 @@ A Chrome extension that finds videos on a page and downloads them.
 - **HLS.** Downloads the stream segment by segment in a separate tab with a progress bar and joins the segments into one file: `.mp4` for fMP4 streams, `.ts` for classic ones.
 - **Boosty.** For every open `boosty.to/<author>/posts/…` tab, fetches the videos through your Boosty session, with quality selection up to 4K.
 
-Files are saved to **Downloads/Video Saver**. Everything runs inside Chrome, so your site logins and any browser VPN keep working.
+Files are saved to **Downloads/Video Downloader**. Everything runs inside Chrome, so your site logins and any browser VPN keep working.
 
 ## Installation
 

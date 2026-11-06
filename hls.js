@@ -9,7 +9,7 @@ const RETRIES = 4;
 
 const params = new URLSearchParams(location.search);
 const src = params.get("src");
-const name = params.get("name") || "Video Saver/video";
+const name = params.get("name") || "Video Downloader/video";
 const $ = (id) => document.getElementById(id);
 
 const shortName = name.split("/").pop();
