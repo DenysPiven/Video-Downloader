@@ -75,7 +75,7 @@ function refreshNames() {
   const names = finalNames();
   for (const it of items) {
     it.nameEl.textContent = it.kind === "hls" ? `${names.get(it)}.mp4` : names.get(it);
-    it.nameEl.title = it.url;
+    it.nameEl.title = it.getUrl();
   }
 }
 
@@ -122,14 +122,6 @@ async function scanPage(tabId) {
   }
 }
 
-// The entry most likely to be "the video" of a tab: the biggest file, else an
-// HLS master playlist, else whatever was seen first.
-function pickDefault(entries) {
-  const files = entries.filter((e) => e.kind === "file");
-  if (files.length) return files.reduce((a, b) => ((b.size || 0) > (a.size || 0) ? b : a));
-  return entries.find((e) => /master|playlist|index/i.test(e.url)) || entries[0];
-}
-
 async function collect() {
   const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
   const tabs = (await chrome.tabs.query({})).filter((t) => /^https?:/.test(t.url || ""));
@@ -148,17 +140,78 @@ async function collect() {
     .sort((a, b) => (b.tab.id === active?.id) - (a.tab.id === active?.id) || a.tab.windowId - b.tab.windowId || a.tab.index - b.tab.index);
 }
 
+// ---------- Qualities ----------
+
+const PROBE_TIMEOUT_MS = 5000;
+
+// Reads resolution and duration from the file header with a hidden <video>.
+function probe(url) {
+  return withTimeout(new Promise((resolve) => {
+    const v = document.createElement("video");
+    v.preload = "metadata";
+    v.muted = true;
+    const done = (result) => { v.removeAttribute("src"); v.load(); resolve(result); };
+    v.onloadedmetadata = () => done({ width: v.videoWidth, height: v.videoHeight, duration: v.duration });
+    v.onerror = () => done(null);
+    v.src = url;
+  }), PROBE_TIMEOUT_MS, null);
+}
+
+const knownDuration = (e) => Number.isFinite(e.meta?.duration) && e.meta.duration > 0;
+
+// Files of one video in different qualities have the same duration: merge them
+// into one video with several variants, best quality first.
+function buildVideos(entries) {
+  const videos = [];
+  for (const e of entries) {
+    if (e.kind === "file" && knownDuration(e)) {
+      const same = videos.find((v) => v.kind === "file" && v.duration && Math.abs(v.duration - e.meta.duration) < 1.5);
+      if (same) { same.variants.push(e); continue; }
+      videos.push({ kind: "file", duration: e.meta.duration, variants: [e] });
+    } else {
+      videos.push({ kind: e.kind, duration: knownDuration(e) ? e.meta.duration : 0, variants: [e] });
+    }
+  }
+  for (const v of videos) {
+    v.variants.sort((a, b) => (b.meta?.height || 0) - (a.meta?.height || 0) || (b.size || 0) - (a.size || 0));
+  }
+  return videos;
+}
+
+// The video most likely to be "the" video of a tab: the longest file, else an
+// HLS master playlist, else whatever was seen first.
+function pickDefault(videos) {
+  const files = videos.filter((v) => v.kind === "file");
+  if (files.length) {
+    return files.reduce((a, b) => (b.duration > a.duration || (b.duration === a.duration && (b.variants[0].size || 0) > (a.variants[0].size || 0)) ? b : a));
+  }
+  return videos.find((v) => /master|playlist|index/i.test(v.variants[0].url)) || videos[0];
+}
+
+function qualityLabel(e) {
+  return [e.meta?.height ? `${e.meta.height}p` : null, e.size ? formatSize(e.size) : null].filter(Boolean).join(" · ") || "Unknown quality";
+}
+
+function formatDuration(sec) {
+  const s = Math.round(sec);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const pad = (n) => String(n).padStart(2, "0");
+  return h ? `${h}:${pad(m)}:${pad(s % 60)}` : `${m}:${pad(s % 60)}`;
+}
+
 // ---------- Rendering: found videos ----------
 
 function renderGroup({ tab, entries }) {
+  const videos = buildVideos(entries);
   const host = new URL(tab.url).hostname.replace(/^www\./, "");
   const title = cleanTitle(tab.title, host);
-  const best = pickDefault(entries);
+  const best = pickDefault(videos);
   const start = items.length;
 
-  const toggle = el("button", { className: "link", textContent: "All", hidden: entries.length < 2 });
+  const toggle = el("button", { className: "link", textContent: "All", hidden: videos.length < 2 });
   toggle.addEventListener("click", () => {
-    const mine = items.slice(start, start + entries.length);
+    const mine = items.slice(start, start + videos.length);
     const allOn = mine.every((i) => i.checkbox.checked);
     for (const i of mine) i.checkbox.checked = !allOn;
     toggle.textContent = allOn ? "All" : "None";
@@ -179,23 +232,35 @@ function renderGroup({ tab, entries }) {
     toggle,
   ])]);
 
-  entries.forEach((e, i) => {
-    const checkbox = el("input", { type: "checkbox", checked: e === best });
+  videos.forEach((v) => {
+    const checkbox = el("input", { type: "checkbox", checked: v === best });
     checkbox.addEventListener("change", updateButton);
     const nameEl = el("div", { className: "name" });
-    const ext = extFromUrl(e.url, e.ct);
+    const first = v.variants[0];
+    const ext = extFromUrl(first.url, first.ct);
     let srcHost = "";
-    try { srcHost = new URL(e.url).hostname.replace(/^www\./, ""); } catch {}
-    const detail = [e.kind === "hls" ? "HLS stream" : ext.toUpperCase(), e.size ? formatSize(e.size) : null, srcHost !== host ? srcHost : null]
-      .filter(Boolean).join(" · ");
+    try { srcHost = new URL(first.url).hostname.replace(/^www\./, ""); } catch {}
+
+    let select = null;
+    if (v.variants.length > 1) {
+      select = el("select", { title: "Quality" });
+      v.variants.forEach((e, i) => select.append(el("option", { value: String(i), textContent: qualityLabel(e) })));
+    }
+    const detail = [
+      v.kind === "hls" ? "HLS stream" : ext.toUpperCase(),
+      v.duration ? formatDuration(v.duration) : null,
+      select ? null : (v.kind === "file" ? qualityLabel(first) : null),
+      srcHost !== host ? srcHost : null,
+    ].filter(Boolean).join(" · ");
 
     const text = el("div", { className: "row-text" }, [nameEl, el("div", { className: "detail", textContent: detail })]);
     text.addEventListener("click", () => { checkbox.checked = !checkbox.checked; updateButton(); });
-    const row = el("div", { className: "row" }, [checkbox, text]);
+    const row = el("div", { className: "row" }, [checkbox, text, select]);
     row.style.animationDelay = `${Math.min(items.length, 10) * 25}ms`;
     box.append(row);
 
-    items.push({ checkbox, nameEl, kind: e.kind, url: e.url, ext, site: host, title });
+    const getUrl = () => v.variants[select ? Number(select.value) : 0].url;
+    items.push({ checkbox, nameEl, kind: v.kind, ext, site: host, title, getUrl });
   });
 
   $("list").append(box);
@@ -262,6 +327,8 @@ async function scan() {
   setStatus("Looking for videos…");
 
   const groups = await collect();
+  setStatus("Reading video info…");
+  await Promise.all(groups.flatMap((g) => g.entries.filter((e) => e.kind === "file").map(async (e) => { e.meta = await probe(e.url); })));
   groups.forEach(renderGroup);
   refreshNames();
 
@@ -279,7 +346,7 @@ async function downloadSelected() {
     const name = names.get(it);
     return {
       id: crypto.randomUUID(),
-      url: it.url,
+      url: it.getUrl(),
       kind: it.kind,
       name: it.kind === "hls" ? `${name}.mp4` : name,
       path: folder ? `${folder}/${name}` : name,

@@ -6,6 +6,7 @@ A Chrome extension that finds videos in your open tabs and downloads them. Every
 
 - **Any site, every tab.** Watches which video files (MP4, WebM, MOV, MKV) and HLS streams (`.m3u8`) each tab loads, and also picks up `<video>` elements. The popup lists videos from all open tabs, grouped by site, with the most likely video in each tab pre-selected. The toolbar badge shows how many videos a tab has.
 - **Folder.** Files go to `Downloads/Video Downloader` by default; type any other subfolder of Downloads in the popup. Files are named after the page title.
+- **Quality choice.** The popup reads each file's resolution and duration. Files of one video in different qualities are merged into one row with a quality selector (best first), e.g. `1080p · 459 MB`, `720p · 219 MB`.
 - **Skip duplicates.** With **Skip files already downloaded** on (default), files already downloaded to the same path are skipped, so re-running a series only fetches what's missing.
 - **Chunked players.** Players that load a file in pieces with the byte range in the URL (`?bytes=0-131071`) are detected as one whole file.
 - **Progress in the popup.** Running and finished downloads are listed at the top of the popup, with the source site for each.
