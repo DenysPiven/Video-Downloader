@@ -1,12 +1,11 @@
 import { safeName, extFromUrl, formatSize } from "./util.js";
+import { loadSettings, cleanFolder, folderLabel } from "./settings.js";
+import { folderAccess } from "./store.js";
 
-const DEFAULTS = { subfolder: "Video Downloader", skip: true, askEach: false, recentFolders: [] };
-const MAX_RECENT = 8;
-const OLD_DEFAULT_FOLDER = "video-downloader";
 const $ = (id) => document.getElementById(id);
 
 let items = []; // { checkbox, nameEl, kind, url, ext, site, title }
-let settings = { ...DEFAULTS };
+let settings = null;
 
 function setStatus(text, isError = false) {
   $("status").textContent = text;
@@ -19,105 +18,19 @@ function el(tag, props = {}, children = []) {
   return e;
 }
 
-// ---------- Settings ----------
+// ---------- Folder ----------
 
-async function loadSettings() {
-  settings = { ...DEFAULTS, ...(await chrome.storage.local.get(Object.keys(DEFAULTS))) };
-  if (settings.subfolder === OLD_DEFAULT_FOLDER) saveSetting("subfolder", DEFAULTS.subfolder);
-  $("skip").checked = settings.skip;
-  renderFolderButton();
+async function renderFolder() {
+  settings = await loadSettings();
+  const { dir, permission } = await folderAccess();
+  const custom = settings.folderMode === "custom" && dir;
+  if (!custom) settings.folderMode = "downloads";
+  $("folder-name").textContent = folderLabel(settings);
+  $("folder-name").title = custom ? "A folder you picked" : "Inside your Downloads folder";
+  $("access").hidden = !(custom && permission !== "granted");
 }
 
-function saveSetting(key, value) {
-  settings[key] = value;
-  chrome.storage.local.set({ [key]: value });
-}
-
-// "Shows/My Show" -> "Shows/My Show"; strips unsafe parts and "..".
-function cleanFolder(s) {
-  return String(s || "")
-    .split(/[\\/]+/)
-    .map((p) => safeName(p, ""))
-    .filter((p) => p && p !== "." && p !== "..")
-    .join("/");
-}
-
-// ---------- Folder picker ----------
-
-const folderLabel = (folder) => (folder ? `Downloads/${folder}` : "Downloads");
-
-function renderFolderButton() {
-  $("folder-name").textContent = settings.askEach ? "Ask every time" : folderLabel(cleanFolder(settings.subfolder));
-}
-
-function rememberFolder(folder) {
-  const recent = [folder, ...settings.recentFolders.filter((f) => f !== folder)].slice(0, MAX_RECENT);
-  saveSetting("recentFolders", recent);
-}
-
-function chooseFolder(folder) {
-  saveSetting("subfolder", folder);
-  saveSetting("askEach", false);
-  rememberFolder(folder);
-  renderFolderButton();
-  toggleFolderMenu(false);
-}
-
-// Subfolders of Downloads that already hold downloads, newest first.
-async function foldersFromHistory() {
-  const { downloadsRoot } = await chrome.storage.local.get("downloadsRoot");
-  if (!downloadsRoot) return [];
-  const root = `${downloadsRoot.replace(/\\/g, "/")}/`;
-  const found = await chrome.downloads.search({ orderBy: ["-startTime"], limit: 300, exists: true, state: "complete" });
-  const out = [];
-  for (const d of found) {
-    const file = (d.filename || "").replace(/\\/g, "/");
-    if (!file.startsWith(root)) continue;
-    const rel = file.slice(root.length);
-    const dir = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "";
-    if (dir && !out.includes(dir)) out.push(dir);
-  }
-  return out;
-}
-
-async function renderFolderMenu() {
-  const current = settings.askEach ? null : cleanFolder(settings.subfolder);
-  const folders = [];
-  for (const f of [DEFAULTS.subfolder, ...settings.recentFolders, ...(await foldersFromHistory())]) {
-    if (f && !folders.includes(f)) folders.push(f);
-  }
-  if (current && !folders.includes(current)) folders.unshift(current);
-
-  const item = (folder) => {
-    const b = el("button", { type: "button", className: `menu-item${folder === current ? " current" : ""}`, role: "option" }, [
-      el("span", { className: "mi-text", textContent: folderLabel(folder), title: folderLabel(folder) }),
-    ]);
-    b.addEventListener("click", () => chooseFolder(folder));
-    return b;
-  };
-  $("folder-list").replaceChildren(item(""), ...folders.map(item), el("div", { className: "menu-sep" }));
-  $("ask-each").classList.toggle("current", settings.askEach);
-}
-
-async function toggleFolderMenu(open = $("folder-menu").hidden) {
-  if (open) await renderFolderMenu();
-  $("folder-menu").hidden = !open;
-  $("folder-btn").setAttribute("aria-expanded", String(open));
-}
-
-// Reveals the last file saved in the current folder, or Downloads itself.
-async function openFolder() {
-  const folder = cleanFolder(settings.subfolder);
-  if (folder && !settings.askEach) {
-    const sep = "[\\\\/]";
-    const [last] = await chrome.downloads.search({
-      filenameRegex: `${sep}${escapeRe(folder).replace(/\//g, sep)}${sep}[^\\\\/]+$`,
-      orderBy: ["-startTime"], limit: 1, exists: true, state: "complete",
-    });
-    if (last) return chrome.downloads.show(last.id);
-  }
-  chrome.downloads.showDefaultFolder();
-}
+const openSettings = () => chrome.runtime.openOptionsPage();
 
 // ---------- Naming ----------
 
@@ -419,6 +332,8 @@ async function downloadSelected() {
   const names = finalNames();
   const picked = items.filter((i) => i.checkbox.checked);
   if (!picked.length) return;
+  await renderFolder();
+  const toFolder = settings.folderMode === "custom";
   const folder = cleanFolder(settings.subfolder);
   const batch = picked.map((it) => {
     const name = names.get(it);
@@ -427,39 +342,31 @@ async function downloadSelected() {
       url: it.getUrl(),
       kind: it.kind,
       name: it.kind === "hls" ? `${name}.mp4` : name,
-      path: folder ? `${folder}/${name}` : name,
+      target: toFolder ? "folder" : "downloads",
+      fileName: name,                              // for a picked folder
+      path: folder ? `${folder}/${name}` : name,   // for Downloads
       site: it.site,
-      saveAs: settings.askEach,
+      saveAs: false,
       skip: settings.skip,
     };
   });
   $("download").disabled = true;
-  if (!settings.askEach) rememberFolder(folder);
   await chrome.runtime.sendMessage({ type: "enqueue", items: batch });
   for (const it of picked) it.checkbox.checked = false;
   updateButton();
 }
 
-$("skip").addEventListener("change", (e) => saveSetting("skip", e.target.checked));
-$("folder-btn").addEventListener("click", () => toggleFolderMenu());
-$("open-folder").addEventListener("click", openFolder);
-$("ask-each").addEventListener("click", () => { saveSetting("askEach", true); renderFolderButton(); toggleFolderMenu(false); });
-$("new-folder").addEventListener("submit", (e) => {
-  e.preventDefault();
-  const folder = cleanFolder($("new-folder-input").value);
-  if (!folder) return;
-  $("new-folder-input").value = "";
-  chooseFolder(folder);
-});
-document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("folder-menu").hidden) { e.preventDefault(); toggleFolderMenu(false); } });
+$("change").addEventListener("click", openSettings);
+$("allow").addEventListener("click", openSettings);
 $("refresh").addEventListener("click", scan);
 $("download").addEventListener("click", downloadSelected);
 $("clear").addEventListener("click", () => chrome.runtime.sendMessage({ type: "clear-finished" }));
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "session" && changes.jobs) { jobs = changes.jobs.newValue || []; renderJobs(); }
+  if (area === "local") renderFolder();
 });
 
-await loadSettings();
+await renderFolder();
 await loadJobs();
 pollBytes();
 scan().catch((e) => setStatus(`Error: ${e.message}`, true));

@@ -144,6 +144,16 @@ async function alreadyDownloaded(path) {
 
 async function startJob(job) {
   try {
+    if (job.target === "folder") {
+      await updateJob(job.id, { state: "active", text: "Starting…" });
+      await ensureOffscreen();
+      chrome.runtime.sendMessage({
+        target: "offscreen", type: "save",
+        job: { id: job.id, url: job.url, kind: job.kind, fileName: job.fileName, skip: job.skip },
+      });
+      return;
+    }
+
     if (job.kind === "hls") {
       if (job.skip && ((await alreadyDownloaded(`${job.path}.mp4`)) || (await alreadyDownloaded(`${job.path}.ts`)))) {
         return updateJob(job.id, { state: "skipped", text: "Already downloaded", progress: 1 });
@@ -206,7 +216,7 @@ chrome.downloads.onChanged.addListener(async (delta) => {
   }
 });
 
-// ---------- Offscreen document (HLS joining) ----------
+// ---------- Offscreen document (HLS joining, writing to a chosen folder) ----------
 
 let creating = null;
 async function ensureOffscreen() {
@@ -214,7 +224,7 @@ async function ensureOffscreen() {
   creating ??= chrome.offscreen.createDocument({
     url: "offscreen.html",
     reasons: ["BLOBS"],
-    justification: "Join HLS stream segments into a single video file before saving it.",
+    justification: "Join HLS stream segments into one file and write downloads into the folder the user picked.",
   }).finally(() => { creating = null; });
   await creating;
 }
@@ -233,11 +243,17 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     }).then(() => sendResponse({ ok: true }));
     return true;
   }
-  if (msg.type === "hls-progress") {
+  if (msg.type === "job-progress") {
     updateJob(msg.id, { text: msg.text, progress: msg.progress });
   }
-  if (msg.type === "hls-failed") {
-    updateJob(msg.id, { state: "failed", text: msg.error });
+  if (msg.type === "job-done") {
+    updateJob(msg.id, { state: "done", text: msg.text || "Done", progress: 1, note: msg.note || "" });
+  }
+  if (msg.type === "job-skipped") {
+    updateJob(msg.id, { state: "skipped", text: "Already in folder", progress: 1 });
+  }
+  if (msg.type === "job-failed") {
+    updateJob(msg.id, { state: "failed", text: msg.error, needsAccess: Boolean(msg.needsAccess) });
   }
   if (msg.type === "hls-done") {
     (async () => {

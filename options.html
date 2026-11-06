@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Video Downloader · Settings</title>
+  <link rel="icon" href="icons/icon-32.png">
+  <link rel="stylesheet" href="style.css">
+  <style>
+    body { min-height: 100vh; }
+    main { max-width: 640px; margin: 0 auto; padding: 40px 16px 64px; }
+
+    .brand { display: flex; align-items: center; gap: 12px; font-weight: 600; font-size: 15px; }
+
+    .hero { padding: 40px 0 28px; border-bottom: 1px solid var(--line); }
+    .hero .label { display: block; margin-bottom: 10px; }
+    .path { font-size: clamp(28px, 7vw, 44px); font-weight: 700; letter-spacing: -.03em; line-height: 1.05; word-break: break-word; }
+    .path-note { margin-top: 10px; color: var(--muted); }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
+    .actions button { padding: 11px 16px; min-height: 44px; }
+
+    .banner { margin-top: 18px; padding: 14px 16px; border-radius: 10px; background: var(--accent); color: var(--on-accent); display: flex; align-items: center; justify-content: space-between; gap: 12px; font-weight: 500; animation: rise .3s ease both; }
+    .banner button { background: var(--on-accent); color: var(--accent); }
+    .banner[hidden] { display: none; }
+
+    section { padding: 28px 0; border-bottom: 1px solid var(--line); }
+    section > h2 { margin: 0 0 4px; font-size: 16px; font-weight: 600; }
+    section > p { margin: 0 0 14px; color: var(--muted); }
+
+    .folders { display: flex; flex-direction: column; }
+    .folder { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 44px; padding: 10px 10px; background: none; color: var(--fg); font-weight: 500; text-align: left; border-radius: 8px; }
+    .folder:hover { background: var(--line); }
+    .folder svg { width: 18px; height: 18px; flex: none; color: var(--muted); }
+    .folder .f-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .folder .f-tag { font-size: 12px; color: var(--muted); }
+    .folder.current { background: var(--line); }
+    .folder.current .f-tag { color: var(--ok); font-weight: 600; }
+
+    .new-folder { display: flex; align-items: center; gap: 4px; margin-top: 8px; padding: 6px 6px 6px 12px; border: 1px dashed var(--line); border-radius: 8px; }
+    .new-folder .prefix { color: var(--muted); }
+    .new-folder input { flex: 1; min-width: 0; font: inherit; font-weight: 600; color: var(--fg); background: none; border: 0; outline: none; padding: 8px 0; }
+    .new-folder input::placeholder { color: var(--muted); font-weight: 400; }
+
+    .toggle { display: flex; align-items: center; gap: 12px; min-height: 44px; cursor: pointer; }
+    .toggle small { display: block; color: var(--muted); font-size: 12px; }
+
+    @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="brand"><img class="mark" src="icons/logo.svg" width="28" height="28" alt="">Video Downloader</div>
+
+    <div class="hero">
+      <span class="label">Videos are saved to</span>
+      <div class="path" id="path">Downloads/Video Downloader</div>
+      <div class="path-note" id="path-note"></div>
+      <div class="actions">
+        <button id="choose">Choose folder…</button>
+        <button id="reveal" class="ghost">Show in Finder</button>
+      </div>
+      <div class="banner" id="banner" hidden>
+        <span id="banner-text"></span>
+        <button id="banner-btn">Allow</button>
+      </div>
+    </div>
+
+    <section>
+      <h2>Or a folder inside Downloads</h2>
+      <p>Saved through Chrome's downloads; no access prompts.</p>
+      <div class="folders" id="folders"></div>
+      <form class="new-folder" id="new-folder">
+        <span class="prefix">Downloads/</span>
+        <input type="text" id="new-folder-input" spellcheck="false" placeholder="New folder, e.g. Shows/My Show">
+        <button type="submit" class="ghost">Use</button>
+      </form>
+    </section>
+
+    <section>
+      <label class="toggle">
+        <input type="checkbox" id="skip">
+        <span>Skip files already downloaded<small>Re-running a series only fetches what's missing.</small></span>
+      </label>
+    </section>
+  </main>
+  <script type="module" src="options.js"></script>
+</body>
+</html>

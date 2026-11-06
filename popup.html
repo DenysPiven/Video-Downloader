@@ -21,26 +21,10 @@
     .setting input[type="text"]:focus { box-shadow: 0 1px 0 var(--accent); }
     .toggle { cursor: pointer; }
 
-    .picker { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 4px 6px; margin: -4px -6px; background: none; color: var(--fg); font-weight: 600; text-align: left; border-radius: 6px; }
-    .picker:hover, .picker[aria-expanded="true"] { background: var(--line); }
-    .picker #folder-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .picker .icon { color: var(--muted); flex: none; }
-    .chev { width: 16px; height: 16px; flex: none; color: var(--muted); transition: transform .15s ease; }
-    .picker[aria-expanded="true"] .chev { transform: rotate(180deg); }
-    #open-folder { padding: 4px; }
-
-    .menu { border-top: 1px solid var(--line); padding: 6px; animation: rise .18s ease both; }
-    .menu-item { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; padding: 7px 8px; background: none; color: var(--fg); font-weight: 500; text-align: left; border-radius: 6px; }
-    .menu-item:hover { background: var(--line); }
-    .menu-item.current { background: var(--line); }
-    .menu-item.current .mi-text::after { content: "  ✓"; color: var(--ok); }
-    .mi-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
-    .mi-note { font-size: 11px; color: var(--muted); font-weight: 400; }
-    .new-folder { display: flex; align-items: center; gap: 2px; margin: 4px 0; padding: 6px 8px; border: 1px dashed var(--line); border-radius: 6px; }
-    .new-folder input { flex: 1; min-width: 0; font: inherit; font-weight: 600; color: var(--fg); background: none; border: 0; outline: none; padding: 0; }
-    .new-folder input::placeholder { color: var(--muted); font-weight: 400; }
-    .new-folder button { padding: 2px 8px; }
-    .menu-sep { height: 1px; background: var(--line); margin: 4px 2px; }
+    .folder-name { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .access { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 12px; border-top: 1px solid var(--line); background: var(--accent); color: var(--on-accent); border-radius: 0 0 9px 9px; font-weight: 500; }
+    .access[hidden] { display: none; }
+    .access button { background: var(--on-accent); color: var(--accent); padding: 4px 10px; }
 
     #status { padding: 12px 14px 0; color: var(--muted); font-size: 12px; }
     #status.err { color: var(--err); }
@@ -94,28 +78,13 @@
   <div class="settings">
     <div class="setting">
       <span class="label">Folder</span>
-      <button id="folder-btn" class="picker" aria-haspopup="true" aria-expanded="false">
-        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-        <span id="folder-name">Downloads/Video Downloader</span>
-        <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg>
-      </button>
-      <button id="open-folder" class="ghost" title="Show in Finder" aria-label="Show folder in Finder">
-        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>
-      </button>
+      <span class="folder-name" id="folder-name">Downloads/Video Downloader</span>
+      <button id="change" class="link">Change</button>
     </div>
-    <div id="folder-menu" class="menu" hidden>
-      <div id="folder-list" role="listbox" aria-label="Folders"></div>
-      <form id="new-folder" class="new-folder">
-        <span class="prefix">Downloads/</span>
-        <input type="text" id="new-folder-input" spellcheck="false" placeholder="New folder, e.g. Shows/My Show">
-        <button type="submit" class="ghost">Use</button>
-      </form>
-      <button id="ask-each" class="menu-item" type="button">
-        <span class="mi-text">Ask where to save each time…</span>
-        <span class="mi-note">Any folder, via the Save dialog</span>
-      </button>
+    <div class="access" id="access" hidden>
+      <span>Allow access to this folder</span>
+      <button id="allow">Allow</button>
     </div>
-    <label class="setting toggle"><input type="checkbox" id="skip"> Skip files already downloaded</label>
   </div>
 
   <div id="status">Looking for videos…</div>
