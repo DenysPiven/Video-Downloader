@@ -19,10 +19,6 @@
     .setting input[type="text"] { flex: 1; min-width: 0; font: inherit; font-weight: 600; color: var(--fg); background: none; border: 0; padding: 0; outline: none; }
     .setting input[type="text"]::placeholder { color: var(--muted); font-weight: 500; }
     .setting input[type="text"]:focus { box-shadow: 0 1px 0 var(--accent); }
-    .tokens { padding: 0 12px 9px 76px; margin-top: -4px; color: var(--muted); font-size: 11px; }
-    .tokens code { font-family: inherit; color: var(--fg); }
-    .toggles { flex-direction: column; align-items: stretch; gap: 8px; }
-    .toggle { display: flex; align-items: center; gap: 10px; cursor: pointer; }
 
     #status { padding: 12px 14px 0; color: var(--muted); font-size: 12px; }
     #status.err { color: var(--err); }
@@ -77,15 +73,6 @@
     <div class="setting">
       <label class="label" for="folder">Folder</label>
       <div class="field"><span class="prefix">Downloads/</span><input type="text" id="folder" spellcheck="false" placeholder="(Downloads itself)"></div>
-    </div>
-    <div class="setting">
-      <label class="label" for="template">Name</label>
-      <div class="field"><input type="text" id="template" spellcheck="false" placeholder="{title}" aria-describedby="tokens"></div>
-    </div>
-    <div class="tokens" id="tokens"><code>{title}</code> page title · <code>{n}</code> last number in it · <code>{site}</code></div>
-    <div class="setting toggles">
-      <label class="toggle"><input type="checkbox" id="skip"> Skip files already downloaded</label>
-      <label class="toggle"><input type="checkbox" id="saveAs"> Ask where to save each file</label>
     </div>
   </div>
 

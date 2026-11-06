@@ -1,9 +1,9 @@
 import { safeName, extFromUrl, formatSize } from "./util.js";
 
-const DEFAULTS = { subfolder: "video-downloader", nameTemplate: "{title}", skip: true, saveAs: false };
+const DEFAULTS = { subfolder: "video-downloader" };
 const $ = (id) => document.getElementById(id);
 
-let items = []; // { checkbox, nameEl, kind, url, ext, site, title, n, index }
+let items = []; // { checkbox, nameEl, kind, url, ext, site, title }
 let settings = { ...DEFAULTS };
 
 function setStatus(text, isError = false) {
@@ -22,9 +22,6 @@ function el(tag, props = {}, children = []) {
 async function loadSettings() {
   settings = { ...DEFAULTS, ...(await chrome.storage.local.get(Object.keys(DEFAULTS))) };
   $("folder").value = settings.subfolder;
-  $("template").value = settings.nameTemplate === DEFAULTS.nameTemplate ? "" : settings.nameTemplate;
-  $("skip").checked = settings.skip;
-  $("saveAs").checked = settings.saveAs;
 }
 
 function saveSetting(key, value) {
@@ -53,18 +50,8 @@ function cleanTitle(title, host) {
   return t || host;
 }
 
-// Episode-style number: the last number in the title ("Season 3 - 12" -> 12).
-function lastNumber(title) {
-  const all = String(title).match(/\d+/g);
-  return all ? String(Number(all[all.length - 1])) : "";
-}
-
 function fileBase(it) {
-  const name = (settings.nameTemplate || DEFAULTS.nameTemplate)
-    .replaceAll("{title}", it.title)
-    .replaceAll("{site}", it.site)
-    .replaceAll("{n}", it.n || String(it.index + 1));
-  return safeName(name, "video");
+  return safeName(it.title, "video");
 }
 
 // File names for all items; repeats inside one list get " 2", " 3"...
@@ -192,7 +179,7 @@ function renderGroup({ tab, entries }) {
     row.style.animationDelay = `${Math.min(items.length, 10) * 25}ms`;
     box.append(row);
 
-    items.push({ checkbox, nameEl, kind: e.kind, url: e.url, ext, site: host, title, n: lastNumber(title), index: i });
+    items.push({ checkbox, nameEl, kind: e.kind, url: e.url, ext, site: host, title });
   });
 
   $("list").append(box);
@@ -281,8 +268,8 @@ async function downloadSelected() {
       name: it.kind === "hls" ? `${name}.mp4` : name,
       path: folder ? `${folder}/${name}` : name,
       site: it.site,
-      saveAs: settings.saveAs,
-      skip: settings.skip,
+      saveAs: false,
+      skip: true,
     };
   });
   $("download").disabled = true;
@@ -293,9 +280,6 @@ async function downloadSelected() {
 
 $("folder").addEventListener("input", (e) => saveSetting("subfolder", e.target.value));
 $("folder").addEventListener("change", (e) => { e.target.value = cleanFolder(e.target.value); saveSetting("subfolder", e.target.value); });
-$("template").addEventListener("input", (e) => { saveSetting("nameTemplate", e.target.value.trim() || DEFAULTS.nameTemplate); refreshNames(); });
-$("skip").addEventListener("change", (e) => saveSetting("skip", e.target.checked));
-$("saveAs").addEventListener("change", (e) => saveSetting("saveAs", e.target.checked));
 $("refresh").addEventListener("click", scan);
 $("download").addEventListener("click", downloadSelected);
 $("clear").addEventListener("click", () => chrome.runtime.sendMessage({ type: "clear-finished" }));

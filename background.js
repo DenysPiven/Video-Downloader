@@ -11,9 +11,18 @@ const HLS_EXT = /\.m3u8$/i;
 const MIN_FILE_BYTES = 300 * 1024; // smaller "videos" are previews/ads/segments
 const MAX_PER_TAB = 60;
 
-// Players that fetch a file in byte-range chunks via a query parameter
-// (e.g. ?range=0-65535) produce fragments, not whole files.
-const CHUNK_QUERY = /[?&](range|bytes)=\d+-\d*/i;
+// Players often fetch one file in pieces by putting the byte range in the URL
+// (e.g. ?bytes=0-131071). Removing that parameter gives the whole file.
+function stripChunkParam(u) {
+  let chunked = false;
+  for (const k of [...u.searchParams.keys()]) {
+    if (/^(range|bytes)$/i.test(k) && /^\d+-\d*$/.test(u.searchParams.get(k))) {
+      u.searchParams.delete(k);
+      chunked = true;
+    }
+  }
+  return chunked;
+}
 
 const key = (tabId) => `tab_${tabId}`;
 let chain = Promise.resolve(); // serialize storage writes
@@ -39,7 +48,7 @@ function totalSize(h) {
 function classify(details) {
   let u;
   try { u = new URL(details.url); } catch { return null; }
-  if (!/^https?:$/.test(u.protocol) || CHUNK_QUERY.test(u.search)) return null;
+  if (!/^https?:$/.test(u.protocol)) return null;
 
   const h = headerMap(details.responseHeaders);
   const ct = (h["content-type"] || "").split(";")[0].trim().toLowerCase();
@@ -48,19 +57,29 @@ function classify(details) {
   if (SEGMENT_EXT.test(path) || ct === "video/mp2t" || ct === "video/iso.segment") return null;
   if (/mpegurl/.test(ct) || HLS_EXT.test(path)) return { url: details.url, kind: "hls", ct, size: null };
 
-  const looksVideo = ct.startsWith("video/") || (VIDEO_EXT.test(path) && (ct === "" || ct === "application/octet-stream"));
+  const binary = ct === "" || ct === "application/octet-stream" || ct === "binary/octet-stream";
+  const looksVideo = ct.startsWith("video/") || (binary && (VIDEO_EXT.test(path) || details.type === "media"));
   if (!looksVideo) return null;
 
-  const size = totalSize(h);
+  // A chunk's own Content-Length is tiny; only the total from Content-Range counts.
+  const chunked = stripChunkParam(u);
+  const size = chunked && !h["content-range"] ? null : totalSize(h);
   if (size !== null && size < MIN_FILE_BYTES) return null;
-  return { url: details.url, kind: "file", ct, size };
+  return { url: u.href, kind: "file", ct, size };
 }
 
 function record(tabId, entry) {
   serial(async () => {
     const k = key(tabId);
     const list = (await chrome.storage.session.get(k))[k] || [];
-    if (list.some((e) => e.url === entry.url)) return;
+    const known = list.find((e) => e.url === entry.url);
+    if (known) {
+      if (!known.size && entry.size) {
+        known.size = entry.size;
+        await chrome.storage.session.set({ [k]: list });
+      }
+      return;
+    }
     list.push({ ...entry, at: Date.now() });
     if (list.length > MAX_PER_TAB) list.splice(0, list.length - MAX_PER_TAB);
     await chrome.storage.session.set({ [k]: list });
