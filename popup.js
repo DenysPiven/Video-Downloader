@@ -1,9 +1,8 @@
 import { QUALITIES, QUALITY_LABELS, parseBoostyPost, loadBoostyPosts } from "./boosty.js";
 import { safeName, extFromUrl, formatSize } from "./util.js";
 
-const ROOT = "Video Downloader";
 const $ = (id) => document.getElementById(id);
-let items = []; // { checkbox, stateEl, getUrl(), kind, filename }
+let items = []; // { checkbox, kind, getUrl(), name }
 
 function setStatus(text, isError = false) {
   $("status").textContent = text;
@@ -16,17 +15,41 @@ function el(tag, props = {}, children = []) {
   return e;
 }
 
-function addRow(parent, { name, tag, meta, select, kind, getUrl, filename }) {
+function updateButton() {
+  const n = items.filter((i) => i.checkbox.checked).length;
+  $("download").disabled = n === 0;
+  $("download").textContent = n ? `Download ${n} video${n === 1 ? "" : "s"}` : "Download";
+}
+
+function addRow(parent, { label, fmt, meta, select, kind, getUrl, name }) {
   const checkbox = el("input", { type: "checkbox", checked: true });
-  const stateEl = el("span", { className: "state" });
-  parent.append(el("div", { className: "row" }, [
-    el("label", { title: name }, [checkbox, " ", name]),
-    tag ? el("span", { className: "tag", textContent: tag }) : null,
+  checkbox.addEventListener("change", updateButton);
+  const text = el("span", { className: "name", title: label, textContent: label });
+  text.addEventListener("click", () => { checkbox.checked = !checkbox.checked; updateButton(); });
+  const row = el("div", { className: "row" }, [
+    checkbox,
+    text,
+    fmt ? el("span", { className: "fmt", textContent: fmt }) : null,
     meta ? el("span", { className: "meta", textContent: meta }) : null,
     select,
-    stateEl,
-  ]));
-  items.push({ checkbox, stateEl, kind, getUrl, filename });
+  ]);
+  row.style.animationDelay = `${Math.min(items.length, 10) * 25}ms`;
+  parent.append(row);
+  items.push({ checkbox, kind, getUrl, name });
+}
+
+function sectionHead(title, from) {
+  const toggle = el("button", { className: "link", textContent: "Select none" });
+  toggle.addEventListener("click", () => {
+    const mine = items.slice(from, from + toggle._count);
+    const anyOn = mine.some((i) => i.checkbox.checked);
+    for (const i of mine) i.checkbox.checked = !anyOn;
+    toggle.textContent = anyOn ? "Select all" : "Select none";
+    updateButton();
+  });
+  const head = el("div", { className: "sec-head" }, [el("span", { className: "label", textContent: title }), toggle]);
+  head.setCount = (n) => { toggle._count = n; toggle.hidden = n < 2; };
+  return head;
 }
 
 // ---------- Boosty: all open boosty.to post tabs ----------
@@ -40,33 +63,37 @@ async function renderBoosty(allTabs) {
   }
   if (posts.length === 0) return 0;
 
-  const box = el("section", {}, [el("h2", { textContent: `Boosty — open posts: ${posts.length}` })]);
+  const start = items.length;
+  const head = sectionHead(`Boosty · ${posts.length} open post${posts.length === 1 ? "" : "s"}`, start);
+  const box = el("section", {}, [head]);
   $("list").append(box);
   const { results, errors, loggedIn } = await loadBoostyPosts(posts);
-  if (!loggedIn) box.append(el("div", { className: "note", textContent: "Not logged in to Boosty — only free posts are available." }));
+  if (!loggedIn) box.append(el("div", { className: "note", textContent: "Not logged in to Boosty, so only free posts are available." }));
 
-  let count = 0;
   for (const post of results) {
-    box.append(el("h3", { textContent: post.title }));
-    if (!post.hasAccess) { box.append(el("div", { className: "note", textContent: "No access from this account." })); continue; }
-    if (post.videos.length === 0) { box.append(el("div", { className: "note", textContent: "No videos found." })); continue; }
+    if (!post.hasAccess || post.videos.length === 0) {
+      box.append(el("div", { className: "post-title", textContent: post.title }));
+      box.append(el("div", { className: "note", textContent: post.hasAccess ? "No videos in this post." : "No access from this account." }));
+      continue;
+    }
+    if (post.videos.length > 1) box.append(el("div", { className: "post-title", textContent: post.title }));
     post.videos.forEach((v, i) => {
       const select = el("select");
       for (const q of QUALITIES) if (v.urls[q]) select.append(el("option", { value: q, textContent: QUALITY_LABELS[q] }));
       const num = post.videos.length > 1 ? ` - ${String(i + 1).padStart(2, "0")}` : "";
-      const base = `${safeName(post.title)}${num}${v.title && post.videos.length > 1 ? " " + safeName(v.title) : ""}`;
+      const extra = v.title && post.videos.length > 1 ? ` ${safeName(v.title)}` : "";
       addRow(box, {
-        name: v.title || `${post.title}${num}`,
+        label: post.videos.length > 1 ? (v.title || `Video ${i + 1}`) : post.title,
         select,
         kind: "file",
         getUrl: () => v.urls[select.value],
-        filename: `${ROOT}/Boosty/${safeName(post.blog)}/${base}.mp4`,
+        name: `${safeName(post.title)}${num}${extra}.mp4`,
       });
-      count++;
     });
   }
-  for (const e of errors) box.append(el("div", { className: "err", textContent: e }));
-  return count;
+  for (const e of errors) box.append(el("div", { className: "note err", textContent: e }));
+  head.setCount(items.length - start);
+  return items.length - start;
 }
 
 // ---------- Any site: what the current tab loaded or embeds ----------
@@ -94,93 +121,99 @@ async function videosInPage(tabId) {
 }
 
 async function renderCurrentTab(tab) {
-  const box = el("section", {}, [el("h2", { textContent: "On this page" })]);
-  $("list").append(box);
-
   const k = `tab_${tab.id}`;
   const sniffed = (await chrome.storage.session.get(k))[k] || [];
   const entries = new Map(sniffed.map((e) => [e.url, e]));
   for (const url of await videosInPage(tab.id)) {
-    if (!entries.has(url)) {
-      entries.set(url, { url, kind: /\.m3u8(\?|#|$)/i.test(url) ? "hls" : "file", size: null });
-    }
+    if (!entries.has(url)) entries.set(url, { url, kind: /\.m3u8(\?|#|$)/i.test(url) ? "hls" : "file", size: null });
   }
-
   const list = [...entries.values()];
-  if (list.length === 0) {
-    box.append(el("div", { className: "note", textContent: "Nothing found yet. Start playing the video and click Refresh. If the page was open before the extension was installed, reload it." }));
-    return 0;
-  }
+  if (list.length === 0) return 0;
+
+  const start = items.length;
+  const head = sectionHead("On this page", start);
+  const box = el("section", {}, [head]);
+  $("list").append(box);
 
   const title = safeName(tab.title, "video");
   list.forEach((e, i) => {
     const num = list.length > 1 ? ` ${String(i + 1).padStart(2, "0")}` : "";
     let host = "";
-    try { host = new URL(e.url).hostname; } catch {}
-    const file = decodeURIComponent((e.url.split(/[?#]/)[0].split("/").pop() || "")).slice(0, 60);
+    try { host = new URL(e.url).hostname.replace(/^www\./, ""); } catch {}
+    const file = decodeURIComponent(e.url.split(/[?#]/)[0].split("/").pop() || "").slice(0, 60);
+    const ext = extFromUrl(e.url, e.ct);
     addRow(box, {
-      name: `${file || host}`,
-      tag: e.kind === "hls" ? "HLS" : extFromUrl(e.url, e.ct).toUpperCase(),
+      label: file || host,
+      fmt: e.kind === "hls" ? "HLS" : ext.toUpperCase(),
       meta: e.size ? formatSize(e.size) : host,
       kind: e.kind,
       getUrl: () => e.url,
-      filename: `${ROOT}/${title}${num}`, // extension added at download time
+      name: e.kind === "hls" ? `${title}${num}` : `${title}${num}.${ext}`, // HLS extension is set after parsing
     });
   });
+  head.setCount(list.length);
   return list.length;
+}
+
+function renderEmpty() {
+  $("list").append(el("div", { className: "empty" }, [
+    el("img", { src: "icons/logo.svg", width: 56, height: 56, alt: "" }),
+    el("strong", { textContent: "No videos found yet" }),
+    el("span", { textContent: "Start playing the video, then scan again. Tabs opened before the extension was installed need a reload." }),
+  ]));
 }
 
 // ---------- Main ----------
 
+async function showFolder() {
+  const { folderName } = await chrome.storage.local.get("folderName");
+  $("folder").textContent = folderName || "Choose on first download";
+  $("folder").classList.toggle("none", !folderName);
+}
+
+async function openManager() {
+  const url = chrome.runtime.getURL("manager.html");
+  const [existing] = await chrome.tabs.query({ url });
+  if (existing) {
+    await chrome.tabs.update(existing.id, { active: true });
+    await chrome.windows.update(existing.windowId, { focused: true });
+  } else {
+    await chrome.tabs.create({ url });
+  }
+}
+
 async function scan() {
   items = [];
   $("list").replaceChildren();
-  $("download").disabled = true;
+  updateButton();
   setStatus("Looking for videos…");
 
   const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
-  const allTabs = await chrome.tabs.query({ url: "https://boosty.to/*" });
+  const boostyTabs = await chrome.tabs.query({ url: "https://boosty.to/*" });
 
   let total = 0;
-  try { total += await renderBoosty(allTabs); } catch (e) { setStatus(`Boosty: ${e.message}`, true); }
+  try { total += await renderBoosty(boostyTabs); } catch (e) { setStatus(`Boosty: ${e.message}`, true); }
   if (active && !parseBoostyPost(active.url || "")) total += await renderCurrentTab(active);
 
-  setStatus(total ? `Videos found: ${total}.` : "No videos found.");
-  $("download").disabled = total === 0;
+  if (!total) renderEmpty();
+  setStatus(total ? `${total} video${total === 1 ? "" : "s"} found` : "");
+  updateButton();
 }
 
 async function downloadSelected() {
-  $("download").disabled = true;
-  let files = 0, streams = 0;
-  for (const it of items) {
-    if (!it.checkbox.checked) continue;
-    const url = it.getUrl();
-    try {
-      if (it.kind === "hls") {
-        const q = new URLSearchParams({ src: url, name: it.filename });
-        await chrome.tabs.create({ url: `hls.html?${q}`, active: false });
-        it.stateEl.textContent = "separate tab";
-        streams++;
-      } else {
-        const filename = /\.\w{2,4}$/.test(it.filename) ? it.filename : `${it.filename}.${extFromUrl(url)}`;
-        await chrome.downloads.download({ url, filename, conflictAction: "uniquify" });
-        it.stateEl.textContent = "queued ✓";
-        files++;
-      }
-      it.stateEl.className = "state ok";
-    } catch (e) {
-      it.stateEl.textContent = "error";
-      it.stateEl.title = e.message;
-      it.stateEl.className = "state err";
-    }
+  const picked = items.filter((i) => i.checkbox.checked);
+  if (!picked.length) return;
+  const { queue = [] } = await chrome.storage.session.get("queue");
+  for (const it of picked) {
+    queue.push({ id: crypto.randomUUID(), url: it.getUrl(), kind: it.kind, name: it.name });
   }
-  const parts = [];
-  if (files) parts.push(`files sent to Chrome downloads: ${files}`);
-  if (streams) parts.push(`HLS streams assembling in separate tabs: ${streams}`);
-  setStatus(parts.length ? `${parts.join("; ")}. Folder: Downloads/${ROOT}.` : "Nothing selected.");
-  $("download").disabled = false;
+  await chrome.storage.session.set({ queue });
+  await openManager();
+  window.close();
 }
 
 $("refresh").addEventListener("click", scan);
 $("download").addEventListener("click", downloadSelected);
+$("change").addEventListener("click", openManager);
+showFolder();
 scan().catch((e) => setStatus(`Error: ${e.message}`, true));
