@@ -1,47 +1,47 @@
 # Video Downloader
 
-Розширення для Chrome, яке знаходить відео на сторінці й скачує їх.
+A Chrome extension that finds videos on a page and downloads them.
 
-## Що вміє
+## Features
 
-- **Будь-який сайт.** Відстежує, які відеофайли (MP4, WebM, MOV, MKV) і HLS-потоки (`.m3u8`) завантажує сторінка, а також знаходить `<video>` на сторінці. Значок показує, скільки відео знайдено.
-- **HLS.** Скачує потік частинами в окремій вкладці з прогресом і зшиває їх в один файл: `.mp4` для fMP4-потоків, `.ts` для класичних.
-- **Boosty.** Для всіх відкритих вкладок із постами `boosty.to/автор/posts/…` отримує відео через ваш вхід у Boosty, з вибором якості до 4K.
+- **Any site.** Watches which video files (MP4, WebM, MOV, MKV) and HLS streams (`.m3u8`) the page loads, and also picks up `<video>` elements on the page. The toolbar badge shows how many videos were found.
+- **HLS.** Downloads the stream segment by segment in a separate tab with a progress bar and joins the segments into one file: `.mp4` for fMP4 streams, `.ts` for classic ones.
+- **Boosty.** For every open `boosty.to/<author>/posts/…` tab, fetches the videos through your Boosty session, with quality selection up to 4K.
 
-Файли зберігаються в папку **Завантаження/Video Saver**. Усе відбувається в Chrome, тому працюють ваш вхід на сайтах і VPN, якщо він налаштований у браузері.
+Files are saved to **Downloads/Video Saver**. Everything runs inside Chrome, so your site logins and any browser VPN keep working.
 
-## Встановлення
+## Installation
 
-1. Скачайте репозиторій (`git clone` або **Code → Download ZIP** і розпакуйте).
-2. Відкрийте `chrome://extensions` і праворуч угорі увімкніть **Режим розробника**.
-3. Натисніть **Завантажити розпаковане** і виберіть папку репозиторію.
-4. Закріпіть значок розширення на панелі.
+1. Get the repository (`git clone`, or **Code → Download ZIP** and unzip it).
+2. Open `chrome://extensions` and turn on **Developer mode** in the top-right corner.
+3. Click **Load unpacked** and select the repository folder.
+4. Pin the extension icon to the toolbar.
 
-## Як користуватися
+## Usage
 
-1. Відкрийте сторінку з відео і запустіть його, щоб плеєр почав завантаження.
-2. Натисніть на значок розширення і виберіть потрібні відео.
-3. Натисніть **Скачати**.
+1. Open a page with a video and start playing it so the player begins loading.
+2. Click the extension icon and select the videos you want.
+3. Click **Download**.
 
-Якщо сторінка була відкрита ще до встановлення розширення, перезавантажте її.
+If the page was open before the extension was installed, reload it.
 
-## Обмеження
+## Limitations
 
-- Не скачує зашифровані потоки й відео під DRM (Netflix, Disney+, Spotify тощо) і не обходить захист.
-- YouTube не підтримується: там відео й звук ідуть окремими шматками.
-- Якщо в HLS-потоці звук іде окремою доріжкою, файл може вийти без звуку.
-- HLS збирається в пам'яті браузера, тому дуже довгі відео (кілька ГБ) можуть не вміститися.
-- Файли `.ts` відкриваються у VLC або IINA. Конвертувати в `.mp4` можна так: `ffmpeg -i video.ts -c copy video.mp4`.
+- Does not download encrypted or DRM-protected streams (Netflix, Disney+, Spotify, etc.) and does not bypass protection.
+- YouTube is not supported: video and audio are delivered as separate chunks.
+- If an HLS stream carries audio as a separate track, the saved file may have no sound.
+- HLS streams are assembled in browser memory, so very long videos (several GB) may not fit.
+- `.ts` files play in VLC or IINA. To convert to `.mp4`: `ffmpeg -i video.ts -c copy video.mp4`.
 
-Скачуйте лише те, до чого маєте доступ і що дозволено зберігати.
+Only download content you have access to and are allowed to save.
 
-## Файли
+## Files
 
-| Файл | Що робить |
+| File | Purpose |
 |---|---|
-| `manifest.json` | Опис розширення (Manifest V3) |
-| `background.js` | Відстежує відео в мережевих запитах кожної вкладки |
-| `popup.html`, `popup.js` | Вікно розширення: список відео і кнопка «Скачати» |
-| `boosty.js` | Режим Boosty |
-| `hls.html`, `hls.js`, `hls-parse.js` | Скачування й склеювання HLS-потоків |
-| `util.js`, `style.css` | Допоміжні функції та стилі |
+| `manifest.json` | Extension manifest (Manifest V3) |
+| `background.js` | Detects videos in each tab's network requests |
+| `popup.html`, `popup.js` | Extension popup: video list and the Download button |
+| `boosty.js` | Boosty mode |
+| `hls.html`, `hls.js`, `hls-parse.js` | HLS stream download and assembly |
+| `util.js`, `style.css` | Helpers and styles |

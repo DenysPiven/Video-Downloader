@@ -20,5 +20,5 @@ export function extFromUrl(url, ct = "") {
 export function formatSize(bytes) {
   if (!bytes) return "";
   const mb = bytes / (1024 * 1024);
-  return mb >= 1024 ? `${(mb / 1024).toFixed(2)} ГБ` : `${mb.toFixed(mb < 10 ? 1 : 0)} МБ`;
+  return mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${mb.toFixed(mb < 10 ? 1 : 0)} MB`;
 }

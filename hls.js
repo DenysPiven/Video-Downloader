@@ -23,7 +23,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function getText(url) {
   const r = await fetch(url, { credentials: "include" });
-  if (!r.ok) throw new Error(`HTTP ${r.status} для плейлиста`);
+  if (!r.ok) throw new Error(`HTTP ${r.status} for playlist`);
   return r.text();
 }
 
@@ -35,7 +35,7 @@ async function getBytes({ url, range }) {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return await r.arrayBuffer();
     } catch (e) {
-      if (attempt >= RETRIES) throw new Error(`сегмент не скачався (${e.message})`);
+      if (attempt >= RETRIES) throw new Error(`segment download failed (${e.message})`);
       await sleep(700 * attempt);
     }
   }
@@ -43,27 +43,27 @@ async function getBytes({ url, range }) {
 
 async function resolvePlaylist(url) {
   const text = await getText(url);
-  if (!text.trimStart().startsWith("#EXTM3U")) throw new Error("Це не HLS-плейлист.");
+  if (!text.trimStart().startsWith("#EXTM3U")) throw new Error("Not an HLS playlist.");
   if (!isMaster(text)) return { url, text };
 
   const { variants, separateAudio } = parseMaster(text, url);
-  if (!variants.length) throw new Error("У плейлисті немає потоків.");
+  if (!variants.length) throw new Error("The playlist has no streams.");
   const best = variants[0];
   if (best.resolution) $("name").textContent = `${shortName} (${best.resolution})`;
   if (best.audioGroup && separateAudio.has(best.audioGroup)) {
-    warn("Звук у цьому потоці йде окремою доріжкою, тому файл може бути без звуку.");
+    warn("Audio is a separate track in this stream, so the file may have no sound.");
   }
   return { url: best.url, text: await getText(best.url) };
 }
 
 async function run() {
-  if (!src) throw new Error("Не передано адресу потоку.");
+  if (!src) throw new Error("No stream URL provided.");
   const playlist = await resolvePlaylist(src);
   const { segments, init, encrypted, live } = parseMedia(playlist.text, playlist.url);
 
-  if (encrypted) throw new Error(`Потік зашифрований (${encrypted}). Такі потоки розширення не скачує.`);
-  if (!segments.length) throw new Error("У плейлисті немає сегментів.");
-  if (live) warn("Це пряма трансляція: збережеться лише та частина, що є в плейлисті зараз.");
+  if (encrypted) throw new Error(`The stream is encrypted (${encrypted}). Encrypted streams are not supported.`);
+  if (!segments.length) throw new Error("The playlist has no segments.");
+  if (live) warn("This is a live stream: only the part currently in the playlist will be saved.");
 
   const parts = new Array(segments.length);
   let done = 0, bytes = 0, next = 0;
@@ -78,7 +78,7 @@ async function run() {
       done++;
       bytes += parts[i].byteLength;
       $("bar").value = done;
-      info(`Сегментів: ${done} з ${segments.length} · ${formatSize(bytes)}`);
+      info(`Segments: ${done} of ${segments.length} · ${formatSize(bytes)}`);
       document.title = `${Math.floor((done / segments.length) * 100)}% ${shortName}`;
     }
   }
@@ -90,8 +90,8 @@ async function run() {
   const blobUrl = URL.createObjectURL(blob);
   const id = await chrome.downloads.download({ url: blobUrl, filename: `${name}.${ext}`, conflictAction: "uniquify" });
 
-  info(`Готово: ${formatSize(blob.size)}. Файл збережено в папку Завантаження/${name.split("/").slice(0, -1).join("/")}.`);
-  if (ext === "ts") warn("Формат .ts відкривається у VLC або IINA. Щоб отримати .mp4, виконайте: ffmpeg -i файл.ts -c copy файл.mp4");
+  info(`Done: ${formatSize(blob.size)}. Saved to Downloads/${name.split("/").slice(0, -1).join("/")}.`);
+  if (ext === "ts") warn("A .ts file plays in VLC or IINA. To convert to .mp4, run: ffmpeg -i video.ts -c copy video.mp4");
   document.title = `✅ ${shortName}`;
 
   // Keep the blob alive until Chrome has finished writing the file.
@@ -101,6 +101,6 @@ async function run() {
 }
 
 run().catch((e) => {
-  info(`Помилка: ${e.message}`, true);
+  info(`Error: ${e.message}`, true);
   document.title = `❌ ${shortName}`;
 });

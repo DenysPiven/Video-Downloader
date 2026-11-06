@@ -40,16 +40,16 @@ async function renderBoosty(allTabs) {
   }
   if (posts.length === 0) return 0;
 
-  const box = el("section", {}, [el("h2", { textContent: `Boosty — відкритих постів: ${posts.length}` })]);
+  const box = el("section", {}, [el("h2", { textContent: `Boosty — open posts: ${posts.length}` })]);
   $("list").append(box);
   const { results, errors, loggedIn } = await loadBoostyPosts(posts);
-  if (!loggedIn) box.append(el("div", { className: "note", textContent: "Вхід у Boosty не знайдено — доступні лише безкоштовні пости." }));
+  if (!loggedIn) box.append(el("div", { className: "note", textContent: "Not logged in to Boosty — only free posts are available." }));
 
   let count = 0;
   for (const post of results) {
     box.append(el("h3", { textContent: post.title }));
-    if (!post.hasAccess) { box.append(el("div", { className: "note", textContent: "Немає доступу з цього акаунта." })); continue; }
-    if (post.videos.length === 0) { box.append(el("div", { className: "note", textContent: "Відео не знайдено." })); continue; }
+    if (!post.hasAccess) { box.append(el("div", { className: "note", textContent: "No access from this account." })); continue; }
+    if (post.videos.length === 0) { box.append(el("div", { className: "note", textContent: "No videos found." })); continue; }
     post.videos.forEach((v, i) => {
       const select = el("select");
       for (const q of QUALITIES) if (v.urls[q]) select.append(el("option", { value: q, textContent: QUALITY_LABELS[q] }));
@@ -94,7 +94,7 @@ async function videosInPage(tabId) {
 }
 
 async function renderCurrentTab(tab) {
-  const box = el("section", {}, [el("h2", { textContent: "На цій сторінці" })]);
+  const box = el("section", {}, [el("h2", { textContent: "On this page" })]);
   $("list").append(box);
 
   const k = `tab_${tab.id}`;
@@ -108,7 +108,7 @@ async function renderCurrentTab(tab) {
 
   const list = [...entries.values()];
   if (list.length === 0) {
-    box.append(el("div", { className: "note", textContent: "Поки нічого не знайдено. Увімкніть відтворення відео і натисніть «Оновити». Якщо сторінка вже була відкрита до встановлення розширення — перезавантажте її." }));
+    box.append(el("div", { className: "note", textContent: "Nothing found yet. Start playing the video and click Refresh. If the page was open before the extension was installed, reload it." }));
     return 0;
   }
 
@@ -136,7 +136,7 @@ async function scan() {
   items = [];
   $("list").replaceChildren();
   $("download").disabled = true;
-  setStatus("Шукаю відео…");
+  setStatus("Looking for videos…");
 
   const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
   const allTabs = await chrome.tabs.query({ url: "https://boosty.to/*" });
@@ -145,7 +145,7 @@ async function scan() {
   try { total += await renderBoosty(allTabs); } catch (e) { setStatus(`Boosty: ${e.message}`, true); }
   if (active && !parseBoostyPost(active.url || "")) total += await renderCurrentTab(active);
 
-  setStatus(total ? `Знайдено відео: ${total}.` : "Відео не знайдено.");
+  setStatus(total ? `Videos found: ${total}.` : "No videos found.");
   $("download").disabled = total === 0;
 }
 
@@ -159,28 +159,28 @@ async function downloadSelected() {
       if (it.kind === "hls") {
         const q = new URLSearchParams({ src: url, name: it.filename });
         await chrome.tabs.create({ url: `hls.html?${q}`, active: false });
-        it.stateEl.textContent = "окрема вкладка";
+        it.stateEl.textContent = "separate tab";
         streams++;
       } else {
         const filename = /\.\w{2,4}$/.test(it.filename) ? it.filename : `${it.filename}.${extFromUrl(url)}`;
         await chrome.downloads.download({ url, filename, conflictAction: "uniquify" });
-        it.stateEl.textContent = "у черзі ✓";
+        it.stateEl.textContent = "queued ✓";
         files++;
       }
       it.stateEl.className = "state ok";
     } catch (e) {
-      it.stateEl.textContent = "помилка";
+      it.stateEl.textContent = "error";
       it.stateEl.title = e.message;
       it.stateEl.className = "state err";
     }
   }
   const parts = [];
-  if (files) parts.push(`файлів у завантаженнях Chrome: ${files}`);
-  if (streams) parts.push(`HLS-потоків збирається в окремих вкладках: ${streams}`);
-  setStatus(parts.length ? `${parts.join("; ")}. Папка: Завантаження/${ROOT}.` : "Нічого не вибрано.");
+  if (files) parts.push(`files sent to Chrome downloads: ${files}`);
+  if (streams) parts.push(`HLS streams assembling in separate tabs: ${streams}`);
+  setStatus(parts.length ? `${parts.join("; ")}. Folder: Downloads/${ROOT}.` : "Nothing selected.");
   $("download").disabled = false;
 }
 
 $("refresh").addEventListener("click", scan);
 $("download").addEventListener("click", downloadSelected);
-scan().catch((e) => setStatus(`Помилка: ${e.message}`, true));
+scan().catch((e) => setStatus(`Error: ${e.message}`, true));

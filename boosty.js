@@ -51,7 +51,7 @@ export async function loadBoostyPosts(posts) {
           return { title: b.title || "", urls };
         })
         .filter((v) => Object.keys(v.urls).length > 0);
-      results.push({ blog, title: post.title || "Без назви", hasAccess: post.hasAccess !== false, videos });
+      results.push({ blog, title: post.title || "Untitled", hasAccess: post.hasAccess !== false, videos });
     } catch (e) {
       errors.push(`${blog}/${id.slice(0, 8)}: ${e.message}`);
     }
