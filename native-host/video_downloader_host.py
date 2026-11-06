@@ -215,6 +215,39 @@ def _copy(response, out, on_bytes):
         on_bytes(len(block))
 
 
+def _total_from(response):
+    content_range = response.headers.get("Content-Range") or ""
+    if "/" in content_range and content_range.rsplit("/", 1)[1].isdigit():
+        return int(content_range.rsplit("/", 1)[1])
+    return None
+
+
+def probe_size(url, chunk_param, referer):
+    """Asks the server for a stream's total size with a one-byte request."""
+    attempts = [(url, {"Range": "bytes=0-0"})]
+    if chunk_param:
+        separator = "&" if "?" in url else "?"
+        attempts.append((f"{url}{separator}{chunk_param}=0-0", {}))
+    for candidate, extra in attempts:
+        headers = {"User-Agent": USER_AGENT, **extra}
+        if referer:
+            headers["Referer"] = referer
+        try:
+            req = urllib.request.Request(candidate, headers=headers)
+            with urllib.request.urlopen(req, timeout=30, context=SSL_CONTEXT) as response:
+                total = _total_from(response)
+                if total:
+                    return total
+        except (urllib.error.URLError, OSError, ValueError):
+            continue
+    return 0
+
+
+def format_mb(n):
+    mb = n / (1024 * 1024)
+    return f"{mb / 1024:.2f} GB" if mb >= 1024 else f"{mb:.0f} MB"
+
+
 def fetch_to_file(url, path, chunk_param, referer, on_bytes):
     """Saves a stream to `path`. Tries one plain request first; servers that only
     answer ranged requests (?bytes=a-b, as the player used) are read in chunks."""
@@ -265,7 +298,12 @@ def merge(request):
     video_file, audio_file = os.path.join(work, "video.mp4"), os.path.join(work, "audio.mp4")
     partial = os.path.join(work, "merged.mp4")
     referer = request.get("referer") or ""
-    expected = int(request.get("videoSize") or 0) + int(request.get("audioSize") or 0)
+    send({"type": "progress", "id": job, "stage": "Measuring…"})
+    sizes = [
+        probe_size(request["video"], request.get("videoChunkParam"), referer) or int(request.get("videoSize") or 0),
+        probe_size(request["audio"], request.get("audioChunkParam"), referer) or int(request.get("audioSize") or 0),
+    ]
+    expected = sum(sizes) if all(sizes) else 0
     state = {"done": 0, "last": 0.0}
 
     def on_bytes(n):
@@ -275,7 +313,8 @@ def merge(request):
             return
         state["last"] = now
         if expected:
-            send({"type": "progress", "id": job, "percent": min(95, int(state["done"] / expected * 95)), "label": "downloading video and audio"})
+            send({"type": "progress", "id": job, "percent": min(99, int(state["done"] / expected * 100)),
+                  "label": f"{format_mb(state['done'])} of {format_mb(expected)}"})
         else:
             send({"type": "progress", "id": job, "downloaded": state["done"], "total": 0})
 
