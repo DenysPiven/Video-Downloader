@@ -13,19 +13,33 @@
     .settings { margin: 0 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
     .setting { display: flex; align-items: center; gap: 10px; padding: 9px 12px; }
     .setting + .setting { border-top: 1px solid var(--line); }
-    .setting .label { width: 54px; flex: none; }
-    .setting .value { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .setting .value.none { color: var(--muted); font-weight: 500; }
-    #template { flex: 1; min-width: 0; font: inherit; font-weight: 600; color: var(--fg); background: none; border: 0; padding: 0; outline: none; }
-    #template::placeholder { color: var(--muted); font-weight: 500; }
+    .setting > .label { width: 54px; flex: none; }
+    .field { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 2px; }
+    .prefix { color: var(--muted); white-space: nowrap; }
+    .setting input[type="text"] { flex: 1; min-width: 0; font: inherit; font-weight: 600; color: var(--fg); background: none; border: 0; padding: 0; outline: none; }
+    .setting input[type="text"]::placeholder { color: var(--muted); font-weight: 500; }
+    .setting input[type="text"]:focus { box-shadow: 0 1px 0 var(--accent); }
     .tokens { padding: 0 12px 9px 76px; margin-top: -4px; color: var(--muted); font-size: 11px; }
     .tokens code { font-family: inherit; color: var(--fg); }
+    .toggles { flex-direction: column; align-items: stretch; gap: 8px; }
+    .toggle { display: flex; align-items: center; gap: 10px; cursor: pointer; }
 
     #status { padding: 12px 14px 0; color: var(--muted); font-size: 12px; }
     #status.err { color: var(--err); }
 
     main { flex: 1; overflow-y: auto; padding: 0 14px 8px; }
     section { padding-top: 14px; }
+    .sec-head { display: flex; align-items: center; justify-content: space-between; padding-bottom: 4px; }
+
+    .job { padding: 8px 0; border-bottom: 1px solid var(--line); }
+    .job:last-child { border-bottom: 0; }
+    .job-top { display: flex; gap: 10px; align-items: baseline; }
+    .job-name { flex: 1; min-width: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .job-state { font-size: 11px; color: var(--muted); white-space: nowrap; }
+    .job-state.ok { color: var(--ok); } .job-state.err { color: var(--err); }
+    .job-sub { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bar { height: 2px; margin-top: 6px; background: var(--line); border-radius: 1px; overflow: hidden; }
+    .bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .4s ease; }
 
     .site { display: flex; align-items: center; gap: 10px; padding-bottom: 6px; }
     .favicon { width: 16px; height: 16px; flex: none; border-radius: 3px; }
@@ -41,7 +55,7 @@
     .name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .detail { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-    .empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 14px; padding: 36px 24px 28px; color: var(--muted); }
+    .empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 14px; padding: 28px 24px 20px; color: var(--muted); }
     .empty strong { color: var(--fg); font-size: 14px; }
 
     footer { padding: 12px 14px 14px; border-top: 1px solid var(--line); background: var(--bg); }
@@ -61,19 +75,28 @@
 
   <div class="settings">
     <div class="setting">
-      <span class="label">Save to</span>
-      <span class="value" id="folder">Downloads/video-downloader</span>
-      <button id="change" class="link">Change</button>
+      <label class="label" for="folder">Folder</label>
+      <div class="field"><span class="prefix">Downloads/</span><input type="text" id="folder" spellcheck="false" placeholder="(Downloads itself)"></div>
     </div>
     <div class="setting">
       <label class="label" for="template">Name</label>
-      <input id="template" spellcheck="false" placeholder="{title}" aria-describedby="tokens">
+      <div class="field"><input type="text" id="template" spellcheck="false" placeholder="{title}" aria-describedby="tokens"></div>
     </div>
     <div class="tokens" id="tokens"><code>{title}</code> page title · <code>{n}</code> last number in it · <code>{site}</code></div>
+    <div class="setting toggles">
+      <label class="toggle"><input type="checkbox" id="skip"> Skip files already downloaded</label>
+      <label class="toggle"><input type="checkbox" id="saveAs"> Ask where to save each file</label>
+    </div>
   </div>
 
   <div id="status">Looking for videos…</div>
-  <main id="list"></main>
+  <main>
+    <section id="jobs-box" hidden>
+      <div class="sec-head"><span class="label">Downloads</span><button id="clear" class="link">Clear finished</button></div>
+      <div id="jobs"></div>
+    </section>
+    <div id="list"></div>
+  </main>
 
   <footer>
     <button id="download" disabled>Download</button>
