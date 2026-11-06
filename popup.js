@@ -4,12 +4,13 @@ import { loadSettings, cleanFolder, folderLabel, DEFAULTS } from "./settings.js"
 const DEFAULT_SUBFOLDER = DEFAULTS.subfolder;
 const NATIVE_HOST = "com.video_downloader.host";
 import { folderAccess } from "./store.js";
-import { probeAudio } from "./mp4-audio.js";
+import { probeTracks } from "./mp4-audio.js";
 
 const $ = (id) => document.getElementById(id);
 
 let items = []; // { checkbox, nameEl, kind, url, ext, site, title }
 let settings = null;
+let canMerge = false; // the helper has ffmpeg, so video-only files can get their audio track
 
 function setStatus(text, isError = false) {
   $("status").textContent = text;
@@ -157,11 +158,21 @@ function probe(url) {
 
 const knownDuration = (e) => Number.isFinite(e.meta?.duration) && e.meta.duration > 0;
 
+// Audio-only files: soundtracks that split-stream players load next to the video.
+const isAudioOnly = (e) =>
+  e.kind === "audio" ||
+  (e.kind === "file" && ((e.tracks?.audio === true && e.tracks?.video === false) || (knownDuration(e) && e.meta.height === 0)));
+
+// Silent on its own and nothing to add the sound from.
+const staysSilent = (e, v) => e.audio === false && !(v.audioTrack && canMerge);
+
 // Files of one video in different qualities have the same duration: merge them
-// into one video with several variants, best quality first.
+// into one video with several variants, best quality first. A soundtrack with
+// the same duration is attached so silent variants can be merged with it.
 function buildVideos(entries) {
   const videos = [];
-  for (const e of entries) {
+  const audios = entries.filter(isAudioOnly);
+  for (const e of entries.filter((x) => !isAudioOnly(x))) {
     if (e.kind === "file" && knownDuration(e)) {
       const same = videos.find((v) => v.kind === "file" && v.duration && Math.abs(v.duration - e.meta.duration) < 1.5);
       if (same) { same.variants.push(e); continue; }
@@ -171,8 +182,12 @@ function buildVideos(entries) {
     }
   }
   for (const v of videos) {
-    // Files known to be silent (video-only DASH tracks) go last, whatever their resolution.
-    const silent = (e) => (e.audio === false ? 1 : 0);
+    if (v.kind === "file" && v.duration) {
+      const matching = audios.filter((a) => knownDuration(a) && Math.abs(a.meta.duration - v.duration) < 1.5);
+      v.audioTrack = matching.sort((a, b) => (b.size || 0) - (a.size || 0))[0] || null;
+    }
+    // Variants that would stay silent go last, whatever their resolution.
+    const silent = (e) => (staysSilent(e, v) ? 1 : 0);
     v.variants.sort((a, b) => silent(a) - silent(b) || (b.meta?.height || 0) - (a.meta?.height || 0) || (b.size || 0) - (a.size || 0));
   }
   return videos;
@@ -188,9 +203,10 @@ function pickDefault(videos) {
   return videos.find((v) => /master|playlist|index/i.test(v.variants[0].url)) || videos[0];
 }
 
-function qualityLabel(e) {
-  return [e.meta?.height ? `${e.meta.height}p` : null, e.size ? formatSize(e.size) : null, e.audio === false ? "no audio" : null]
-    .filter(Boolean).join(" · ") || "Unknown quality";
+function qualityLabel(e, v) {
+  const size = (e.size || 0) + (e.audio === false && v.audioTrack && canMerge ? v.audioTrack.size || 0 : 0);
+  const sound = e.audio !== false ? null : v.audioTrack && canMerge ? "+ audio" : "no audio";
+  return [e.meta?.height ? `${e.meta.height}p` : null, size ? formatSize(size) : null, sound].filter(Boolean).join(" · ") || "Unknown quality";
 }
 
 function formatDuration(sec) {
@@ -245,12 +261,13 @@ function renderGroup({ tab, entries }) {
     let select = null;
     if (v.variants.length > 1) {
       select = el("select", { title: "Quality" });
-      v.variants.forEach((e, i) => select.append(el("option", { value: String(i), textContent: qualityLabel(e) })));
+      v.variants.forEach((e, i) => select.append(el("option", { value: String(i), textContent: qualityLabel(e, v) })));
     }
     const detail = [
       v.kind === "hls" ? "HLS stream" : ext.toUpperCase(),
       v.duration ? formatDuration(v.duration) : null,
-      select ? null : (v.kind === "file" ? qualityLabel(first) : null),
+      select ? null : (v.kind === "file" ? qualityLabel(first, v) : null),
+      v.audioTrack && !canMerge && v.variants.some((e) => e.audio === false) ? "install the helper to add audio" : null,
       srcHost !== host ? srcHost : null,
     ].filter(Boolean).join(" · ");
 
@@ -260,8 +277,9 @@ function renderGroup({ tab, entries }) {
     row.style.animationDelay = `${Math.min(items.length, 10) * 25}ms`;
     box.append(row);
 
-    const getUrl = () => v.variants[select ? Number(select.value) : 0].url;
-    items.push({ checkbox, nameEl, kind: v.kind, ext, site: host, title, getUrl });
+    const getVariant = () => v.variants[select ? Number(select.value) : 0];
+    const getUrl = () => getVariant().url;
+    items.push({ checkbox, nameEl, kind: v.kind, ext, site: host, title, getUrl, getVariant, audioTrack: v.audioTrack, duration: v.duration });
   });
 
   $("list").append(box);
@@ -392,9 +410,12 @@ async function scan() {
 
   const groups = await collect();
   setStatus("Reading video info…");
-  await Promise.all(groups.flatMap((g) => g.entries.filter((e) => e.kind === "file").map(async (e) => {
-    [e.meta, e.audio] = await Promise.all([probe(e.url), withTimeout(probeAudio(e.url), PROBE_TIMEOUT_MS, null)]);
+  const ping = chrome.runtime.sendNativeMessage(NATIVE_HOST, { type: "ping" }).catch(() => null);
+  await Promise.all(groups.flatMap((g) => g.entries.filter((e) => e.kind === "file" || e.kind === "audio").map(async (e) => {
+    [e.meta, e.tracks] = await Promise.all([probe(e.url), withTimeout(probeTracks(e.url), PROBE_TIMEOUT_MS, { audio: null, video: null })]);
+    e.audio = e.tracks.audio;
   })));
+  canMerge = Boolean((await ping)?.ffmpeg);
   groups.forEach(renderGroup);
   refreshNames();
   const found = items.length;
@@ -423,6 +444,16 @@ async function downloadSelected() {
   const helperDir = `${downloadsRoot || "~/Downloads"}/${toFolder ? cleanFolder(DEFAULT_SUBFOLDER) : folder}`.replace(/\/$/, "");
   const batch = picked.map((it) => {
     const name = names.get(it);
+    const variant = it.getVariant?.();
+    if (it.kind === "file" && variant?.audio === false && it.audioTrack && canMerge) {
+      const base = name.replace(/\.[^.]+$/, "");
+      return {
+        id: crypto.randomUUID(), url: variant.url, audioUrl: it.audioTrack.url, duration: it.duration,
+        kind: "file", target: "merge", name: `${base}.mp4`, fileName: base, dir: helperDir,
+        path: helperDir, site: it.site, skip: settings.skip,
+        note: toFolder ? "Video + audio merged into Downloads" : "Video + audio merged",
+      };
+    }
     if (it.kind === "ytdlp") {
       return {
         id: crypto.randomUUID(), url: it.getUrl(), kind: "ytdlp", target: "ytdlp",

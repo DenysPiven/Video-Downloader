@@ -5,10 +5,12 @@
 //    download manager; HLS streams are joined in an offscreen document first.
 //    Job state lives in chrome.storage.session so the popup can show progress.
 
-const SEGMENT_EXT = /\.(ts|m4s|m4a|m4v\?.*seg|aac|vtt|srt)$/i;
+const SEGMENT_EXT = /\.(ts|m4s|aac|vtt|srt)$/i;
 const VIDEO_EXT = /\.(mp4|webm|mov|mkv|m4v|ogv)$/i;
+const AUDIO_EXT = /\.(m4a|weba)$/i;
 const HLS_EXT = /\.m3u8$/i;
 const MIN_FILE_BYTES = 300 * 1024; // smaller "videos" are previews/ads/segments
+const MIN_AUDIO_BYTES = 100 * 1024;
 const MAX_PER_TAB = 60;
 
 // Players often fetch one file in pieces by putting the byte range in the URL
@@ -59,13 +61,16 @@ function classify(details) {
 
   const binary = ct === "" || ct === "application/octet-stream" || ct === "binary/octet-stream";
   const looksVideo = ct.startsWith("video/") || (binary && (VIDEO_EXT.test(path) || details.type === "media"));
-  if (!looksVideo) return null;
+  // Split-stream players (DASH) load the soundtrack as its own file next to the
+  // video; the popup pairs it with the video and merges them.
+  const looksAudio = /^audio\/(mp4|x-m4a|aac|webm|mpeg)$/.test(ct) || (binary && AUDIO_EXT.test(path));
+  if (!looksVideo && !looksAudio) return null;
 
   // A chunk's own Content-Length is tiny; only the total from Content-Range counts.
   const chunked = stripChunkParam(u);
   const size = chunked && !h["content-range"] ? null : totalSize(h);
-  if (size !== null && size < MIN_FILE_BYTES) return null;
-  return { url: u.href, kind: "file", ct, size };
+  if (size !== null && size < (looksAudio ? MIN_AUDIO_BYTES : MIN_FILE_BYTES)) return null;
+  return { url: u.href, kind: looksAudio ? "audio" : "file", ct, size };
 }
 
 function record(tabId, entry) {
@@ -144,6 +149,14 @@ async function alreadyDownloaded(path) {
 
 async function startJob(job) {
   try {
+    if (job.target === "merge") {
+      await updateJob(job.id, { state: "active", text: "Downloading video and audio…" });
+      nativePort().postMessage({
+        type: "merge", id: job.id, video: job.url, audio: job.audioUrl, duration: job.duration, dir: job.dir, name: job.fileName, skip: job.skip,
+      });
+      return;
+    }
+
     if (job.target === "ytdlp") {
       await updateJob(job.id, { state: "active", text: "Starting yt-dlp…" });
       nativePort().postMessage({
@@ -237,7 +250,7 @@ function formatBytes(bytes) {
 
 async function activeHelperJobs() {
   const { jobs = [] } = await chrome.storage.session.get("jobs");
-  return jobs.filter((j) => j.target === "ytdlp" && (j.state === "active" || j.state === "queued"));
+  return jobs.filter((j) => (j.target === "ytdlp" || j.target === "merge") && (j.state === "active" || j.state === "queued"));
 }
 
 function nativePort() {
@@ -257,6 +270,7 @@ function nativePort() {
 async function onHelperMessage(msg) {
   if (msg.type === "progress") {
     if (msg.stage) return updateJob(msg.id, { text: msg.stage });
+    if (msg.percent != null) return updateJob(msg.id, { text: `${msg.percent}% · downloading and merging`, progress: msg.percent / 100 });
     const now = Date.now();
     if (now - (lastProgressAt.get(msg.id) || 0) < 400) return; // yt-dlp reports very often
     lastProgressAt.set(msg.id, now);

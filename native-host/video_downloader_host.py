@@ -7,7 +7,9 @@ from the browser (separate video/audio streams, signed URLs, ...).
 Messages (JSON, Chrome native messaging framing):
   {"type": "info", "url": ...}                      -> title, duration, qualities
   {"type": "download", "id", "url", "height", "dir", "name", "skip"}
+  {"type": "merge", "id", "video", "audio", "duration", "dir", "name", "skip"}
       -> {"type": "progress"|"done"|"skipped"|"failed", "id", ...}
+  {"type": "ping"}                                  -> {"ok", "ytdlp", "ffmpeg"}
 """
 
 import json
@@ -22,6 +24,7 @@ import threading
 # Chrome starts hosts with a minimal PATH; add the usual Homebrew locations.
 os.environ["PATH"] = os.pathsep.join(["/opt/homebrew/bin", "/usr/local/bin", os.environ.get("PATH", "")])
 YTDLP = shutil.which("yt-dlp")
+FFMPEG = shutil.which("ffmpeg")
 INFO_TIMEOUT_S = 90
 
 _write_lock = threading.Lock()
@@ -145,6 +148,48 @@ def download(request):
         send({"type": "done", "id": job, "file": saved})
 
 
+def merge(request):
+    """Downloads a video-only and an audio-only stream and muxes them (no re-encode)."""
+    job = request["id"]
+    if not FFMPEG:
+        return send({"type": "failed", "id": job, "error": "ffmpeg is not installed. Run: brew install ffmpeg"})
+
+    folder = os.path.expanduser(request["dir"])
+    os.makedirs(folder, exist_ok=True)
+    target = os.path.join(folder, request["name"] + ".mp4")
+    if request.get("skip", True) and os.path.exists(target) and os.path.getsize(target) > 0:
+        return send({"type": "skipped", "id": job})
+    if os.path.exists(target):
+        stem, n = target[:-4], 2
+        while os.path.exists(f"{stem} ({n}).mp4"):
+            n += 1
+        target = f"{stem} ({n}).mp4"
+    partial = target[:-4] + ".part.mp4"
+
+    duration = float(request.get("duration") or 0)
+    args = [
+        FFMPEG, "-hide_banner", "-loglevel", "error", "-y",
+        "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5", "-i", request["video"],
+        "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5", "-i", request["audio"],
+        "-map", "0:v:0", "-map", "1:a:0", "-c", "copy", "-movflags", "+faststart",
+        "-progress", "pipe:1", "-nostats", partial,
+    ]
+    proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+    for line in proc.stdout:
+        key, _, value = line.strip().partition("=")
+        if key == "out_time_us" and value.isdigit() and duration:
+            send({"type": "progress", "id": job, "percent": min(99, int(int(value) / 1e6 / duration * 100))})
+    errors = proc.stderr.read()
+    proc.wait()
+
+    if proc.returncode != 0 or not os.path.exists(partial):
+        if os.path.exists(partial):
+            os.remove(partial)
+        return send({"type": "failed", "id": job, "error": last_error(errors) if errors.strip() else "ffmpeg failed"})
+    os.replace(partial, target)
+    send({"type": "done", "id": job, "file": target})
+
+
 def main():
     while True:
         request = read()
@@ -155,8 +200,10 @@ def main():
             info(request)  # one-shot messages: answer and let Chrome close us
         elif kind == "download":
             threading.Thread(target=download, args=(request,), daemon=False).start()
+        elif kind == "merge":
+            threading.Thread(target=merge, args=(request,), daemon=False).start()
         elif kind == "ping":
-            send({"ok": True, "ytdlp": bool(YTDLP)})
+            send({"ok": True, "ytdlp": bool(YTDLP), "ffmpeg": bool(FFMPEG)})
 
 
 if __name__ == "__main__":
