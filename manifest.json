@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Video Downloader",
-  "version": "2.3.3",
+  "version": "2.3.4",
   "description": "Finds videos in your open tabs (MP4, WebM, HLS) and saves them to a folder you choose.",
   "permissions": [
     "tabs",

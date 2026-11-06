@@ -87,7 +87,20 @@ function updateButton() {
 
 // ---------- Finding videos ----------
 
-async function videosInPage(tabId) {
+const PAGE_SCAN_TIMEOUT_MS = 1500;
+
+// Resolves to `fallback` if the promise takes longer than `ms`.
+function withTimeout(promise, ms, fallback) {
+  return Promise.race([promise, new Promise((resolve) => setTimeout(() => resolve(fallback), ms))]);
+}
+
+async function videosInPage(tab) {
+  // Sleeping or still-loading tabs may never answer a script injection.
+  if (tab.discarded || tab.frozen || tab.status === "unloaded") return [];
+  return withTimeout(scanPage(tab.id), PAGE_SCAN_TIMEOUT_MS, []);
+}
+
+async function scanPage(tabId) {
   try {
     const frames = await chrome.scripting.executeScript({
       target: { tabId, allFrames: true },
@@ -124,7 +137,7 @@ async function collect() {
 
   const groups = await Promise.all(tabs.map(async (tab) => {
     const entries = new Map((stored[`tab_${tab.id}`] || []).map((e) => [e.url, e]));
-    for (const url of await videosInPage(tab.id)) {
+    for (const url of await videosInPage(tab)) {
       if (!entries.has(url)) entries.set(url, { url, kind: /\.m3u8(\?|#|$)/i.test(url) ? "hls" : "file", size: null });
     }
     return { tab, entries: [...entries.values()] };
