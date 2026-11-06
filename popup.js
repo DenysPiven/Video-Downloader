@@ -69,7 +69,7 @@ function refreshNames() {
   const names = finalNames();
   for (const it of items) {
     it.nameEl.textContent = it.kind === "file" ? names.get(it) : `${names.get(it)}.${it.ext || "mp4"}`;
-    it.nameEl.title = it.getUrl();
+    it.nameEl.title = it.nameEl.textContent; // full name on hover; long titles are cut off
   }
 }
 
@@ -347,7 +347,7 @@ function renderJobs() {
     const cls = j.state === "failed" ? "err" : j.state === "done" || j.state === "skipped" ? "ok" : "";
     return el("div", { className: "job" }, [
       el("div", { className: "job-top" }, [
-        el("span", { className: "job-name", textContent: j.name, title: j.path }),
+        el("span", { className: "job-name", textContent: j.name, title: j.name }),
         el("span", { className: `job-state ${cls}`, textContent: text }),
       ]),
       el("div", { className: "job-sub", textContent: [j.site && `from ${j.site}`, j.note].filter(Boolean).join(" · ") }),
