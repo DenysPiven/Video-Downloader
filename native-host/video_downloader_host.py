@@ -32,14 +32,38 @@ FFMPEG = shutil.which("ffmpeg")
 INFO_TIMEOUT_S = 90
 
 _write_lock = threading.Lock()
+LOG_FILE = os.path.expanduser("~/Library/Logs/Video Downloader/helper.log")
+_logged_steps = {}
+
+
+def log(text):
+    try:
+        os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [{os.getpid()}] {text}\n")
+    except OSError:
+        pass
 
 
 def send(message):
+    kind = message.get("type")
+    if kind == "progress" and "percent" in message:
+        step = message["percent"] // 10
+        if _logged_steps.get(message.get("id")) != step:  # one line per 10%
+            _logged_steps[message.get("id")] = step
+            log(f"{message.get('id')} progress {message['percent']}%")
+    elif kind == "progress" and "stage" in message:
+        log(f"{message.get('id')} {message['stage']}")
+    elif kind in ("done", "failed", "skipped"):
+        log(f"{message.get('id')} {kind} {message.get('error') or message.get('file') or ''}")
     data = json.dumps(message).encode("utf-8")
-    with _write_lock:
-        sys.stdout.buffer.write(struct.pack("<I", len(data)))
-        sys.stdout.buffer.write(data)
-        sys.stdout.buffer.flush()
+    try:
+        with _write_lock:
+            sys.stdout.buffer.write(struct.pack("<I", len(data)))
+            sys.stdout.buffer.write(data)
+            sys.stdout.buffer.flush()
+    except (BrokenPipeError, ValueError):
+        log("extension closed the connection; message dropped")
 
 
 def read():
@@ -281,8 +305,11 @@ def main():
     while True:
         request = read()
         if request is None:
+            log("connection closed by the extension")
             break
         kind = request.get("type")
+        if kind in ("download", "merge"):
+            log(f"{request.get('id')} start {kind} -> {request.get('dir')}/{request.get('name')}")
         if kind == "info":
             info(request)  # one-shot messages: answer and let Chrome close us
         elif kind == "download":
