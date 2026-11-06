@@ -1,6 +1,6 @@
 import { safeName, extFromUrl, formatSize } from "./util.js";
 
-const DEFAULTS = { subfolder: "Video Downloader" };
+const DEFAULTS = { subfolder: "Video Downloader", skip: true };
 const OLD_DEFAULT_FOLDER = "video-downloader";
 const $ = (id) => document.getElementById(id);
 
@@ -24,6 +24,7 @@ async function loadSettings() {
   settings = { ...DEFAULTS, ...(await chrome.storage.local.get(Object.keys(DEFAULTS))) };
   if (settings.subfolder === OLD_DEFAULT_FOLDER) saveSetting("subfolder", DEFAULTS.subfolder);
   $("folder").value = settings.subfolder;
+  $("skip").checked = settings.skip;
 }
 
 function saveSetting(key, value) {
@@ -271,7 +272,7 @@ async function downloadSelected() {
       path: folder ? `${folder}/${name}` : name,
       site: it.site,
       saveAs: false,
-      skip: true,
+      skip: settings.skip,
     };
   });
   $("download").disabled = true;
@@ -281,6 +282,7 @@ async function downloadSelected() {
 }
 
 $("folder").addEventListener("input", (e) => saveSetting("subfolder", e.target.value));
+$("skip").addEventListener("change", (e) => saveSetting("skip", e.target.checked));
 $("folder").addEventListener("change", (e) => { e.target.value = cleanFolder(e.target.value); saveSetting("subfolder", e.target.value); });
 $("refresh").addEventListener("click", scan);
 $("download").addEventListener("click", downloadSelected);

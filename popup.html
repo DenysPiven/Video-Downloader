@@ -19,6 +19,7 @@
     .setting input[type="text"] { flex: 1; min-width: 0; font: inherit; font-weight: 600; color: var(--fg); background: none; border: 0; padding: 0; outline: none; }
     .setting input[type="text"]::placeholder { color: var(--muted); font-weight: 500; }
     .setting input[type="text"]:focus { box-shadow: 0 1px 0 var(--accent); }
+    .toggle { cursor: pointer; }
 
     #status { padding: 12px 14px 0; color: var(--muted); font-size: 12px; }
     #status.err { color: var(--err); }
@@ -74,6 +75,7 @@
       <label class="label" for="folder">Folder</label>
       <div class="field"><span class="prefix">Downloads/</span><input type="text" id="folder" spellcheck="false" placeholder="(Downloads itself)"></div>
     </div>
+    <label class="setting toggle"><input type="checkbox" id="skip"> Skip files already downloaded</label>
   </div>
 
   <div id="status">Looking for videos…</div>
