@@ -14,16 +14,17 @@ const MIN_AUDIO_BYTES = 100 * 1024;
 const MAX_PER_TAB = 60;
 
 // Players often fetch one file in pieces by putting the byte range in the URL
-// (e.g. ?bytes=0-131071). Removing that parameter gives the whole file.
+// (e.g. ?bytes=0-131071). Removing that parameter gives one URL for the whole
+// file; its name is kept because some servers only answer ranged requests.
 function stripChunkParam(u) {
-  let chunked = false;
+  let name = null;
   for (const k of [...u.searchParams.keys()]) {
     if (/^(range|bytes)$/i.test(k) && /^\d+-\d*$/.test(u.searchParams.get(k))) {
       u.searchParams.delete(k);
-      chunked = true;
+      name = k;
     }
   }
-  return chunked;
+  return name;
 }
 
 const key = (tabId) => `tab_${tabId}`;
@@ -67,10 +68,10 @@ function classify(details) {
   if (!looksVideo && !looksAudio) return null;
 
   // A chunk's own Content-Length is tiny; only the total from Content-Range counts.
-  const chunked = stripChunkParam(u);
-  const size = chunked && !h["content-range"] ? null : totalSize(h);
+  const chunkParam = stripChunkParam(u);
+  const size = chunkParam && !h["content-range"] ? null : totalSize(h);
   if (size !== null && size < (looksAudio ? MIN_AUDIO_BYTES : MIN_FILE_BYTES)) return null;
-  return { url: u.href, kind: looksAudio ? "audio" : "file", ct, size };
+  return { url: u.href, kind: looksAudio ? "audio" : "file", ct, size, ...(chunkParam ? { chunkParam } : {}) };
 }
 
 function record(tabId, entry) {
@@ -153,6 +154,8 @@ async function startJob(job) {
       await updateJob(job.id, { state: "active", text: "Downloading video and audio…" });
       nativePort().postMessage({
         type: "merge", id: job.id, video: job.url, audio: job.audioUrl, duration: job.duration, dir: job.dir, name: job.fileName, skip: job.skip,
+        videoChunkParam: job.chunkParam || null, audioChunkParam: job.audioChunkParam || null,
+        videoSize: job.size || 0, audioSize: job.audioSize || 0, referer: job.referer || "",
       });
       return;
     }
@@ -270,7 +273,7 @@ function nativePort() {
 async function onHelperMessage(msg) {
   if (msg.type === "progress") {
     if (msg.stage) return updateJob(msg.id, { text: msg.stage });
-    if (msg.percent != null) return updateJob(msg.id, { text: `${msg.percent}% · downloading and merging`, progress: msg.percent / 100 });
+    if (msg.percent != null) return updateJob(msg.id, { text: `${msg.percent}% · ${msg.label || "downloading"}`, progress: msg.percent / 100 });
     const now = Date.now();
     if (now - (lastProgressAt.get(msg.id) || 0) < 400) return; // yt-dlp reports very often
     lastProgressAt.set(msg.id, now);

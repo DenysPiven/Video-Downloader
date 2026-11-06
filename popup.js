@@ -279,7 +279,7 @@ function renderGroup({ tab, entries }) {
 
     const getVariant = () => v.variants[select ? Number(select.value) : 0];
     const getUrl = () => getVariant().url;
-    items.push({ checkbox, nameEl, kind: v.kind, ext, site: host, title, getUrl, getVariant, audioTrack: v.audioTrack, duration: v.duration });
+    items.push({ checkbox, nameEl, kind: v.kind, ext, site: host, title, getUrl, getVariant, audioTrack: v.audioTrack, duration: v.duration, pageUrl: tab.url });
   });
 
   $("list").append(box);
@@ -449,6 +449,8 @@ async function downloadSelected() {
       const base = name.replace(/\.[^.]+$/, "");
       return {
         id: crypto.randomUUID(), url: variant.url, audioUrl: it.audioTrack.url, duration: it.duration,
+        chunkParam: variant.chunkParam || null, audioChunkParam: it.audioTrack.chunkParam || null,
+        size: variant.size || 0, audioSize: it.audioTrack.size || 0, referer: it.pageUrl,
         kind: "file", target: "merge", name: `${base}.mp4`, fileName: base, dir: helperDir,
         path: helperDir, site: it.site, skip: settings.skip,
         note: toFolder ? "Video + audio merged into Downloads" : "Video + audio merged",

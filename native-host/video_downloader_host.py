@@ -20,6 +20,9 @@ import struct
 import subprocess
 import sys
 import threading
+import time
+import urllib.error
+import urllib.request
 
 # Chrome starts hosts with a minimal PATH; add the usual Homebrew locations.
 os.environ["PATH"] = os.pathsep.join(["/opt/homebrew/bin", "/usr/local/bin", os.environ.get("PATH", "")])
@@ -148,6 +151,56 @@ def download(request):
         send({"type": "done", "id": job, "file": saved})
 
 
+USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
+CHUNK_BYTES = 8 * 1024 * 1024
+
+
+def _open(url, referer):
+    headers = {"User-Agent": USER_AGENT}
+    if referer:
+        headers["Referer"] = referer
+    return urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=60)
+
+
+def _copy(response, out, on_bytes):
+    copied = 0
+    while True:
+        block = response.read(1 << 20)
+        if not block:
+            return copied
+        out.write(block)
+        copied += len(block)
+        on_bytes(len(block))
+
+
+def fetch_to_file(url, path, chunk_param, referer, on_bytes):
+    """Saves a stream to `path`. Tries one plain request first; servers that only
+    answer ranged requests (?bytes=a-b, as the player used) are read in chunks."""
+    try:
+        with _open(url, referer) as response, open(path, "wb") as out:
+            _copy(response, out, on_bytes)
+        return
+    except urllib.error.HTTPError as e:
+        if not chunk_param or e.code not in (400, 403, 404, 416):
+            raise
+
+    separator = "&" if "?" in url else "?"
+    start, total = 0, None
+    with open(path, "wb") as out:
+        while total is None or start < total:
+            end = start + CHUNK_BYTES - 1 if total is None else min(start + CHUNK_BYTES, total) - 1
+            with _open(f"{url}{separator}{chunk_param}={start}-{end}", referer) as response:
+                content_range = response.headers.get("Content-Range") or ""
+                if "/" in content_range and content_range.rsplit("/", 1)[1].isdigit():
+                    total = int(content_range.rsplit("/", 1)[1])
+                copied = _copy(response, out, on_bytes)
+            if copied == 0:
+                break
+            start += copied
+            if total is None and copied < CHUNK_BYTES:
+                break
+
+
 def merge(request):
     """Downloads a video-only and an audio-only stream and muxes them (no re-encode)."""
     job = request["id"]
@@ -164,30 +217,46 @@ def merge(request):
         while os.path.exists(f"{stem} ({n}).mp4"):
             n += 1
         target = f"{stem} ({n}).mp4"
-    partial = target[:-4] + ".part.mp4"
 
-    duration = float(request.get("duration") or 0)
-    args = [
-        FFMPEG, "-hide_banner", "-loglevel", "error", "-y",
-        "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5", "-i", request["video"],
-        "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5", "-i", request["audio"],
-        "-map", "0:v:0", "-map", "1:a:0", "-c", "copy", "-movflags", "+faststart",
-        "-progress", "pipe:1", "-nostats", partial,
-    ]
-    proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
-    for line in proc.stdout:
-        key, _, value = line.strip().partition("=")
-        if key == "out_time_us" and value.isdigit() and duration:
-            send({"type": "progress", "id": job, "percent": min(99, int(int(value) / 1e6 / duration * 100))})
-    errors = proc.stderr.read()
-    proc.wait()
+    work = os.path.join(folder, f".video-downloader-{job}")
+    os.makedirs(work, exist_ok=True)
+    video_file, audio_file = os.path.join(work, "video.mp4"), os.path.join(work, "audio.mp4")
+    partial = os.path.join(work, "merged.mp4")
+    referer = request.get("referer") or ""
+    expected = int(request.get("videoSize") or 0) + int(request.get("audioSize") or 0)
+    state = {"done": 0, "last": 0.0}
 
-    if proc.returncode != 0 or not os.path.exists(partial):
-        if os.path.exists(partial):
-            os.remove(partial)
-        return send({"type": "failed", "id": job, "error": last_error(errors) if errors.strip() else "ffmpeg failed"})
-    os.replace(partial, target)
-    send({"type": "done", "id": job, "file": target})
+    def on_bytes(n):
+        state["done"] += n
+        now = time.monotonic()
+        if now - state["last"] < 0.5:
+            return
+        state["last"] = now
+        if expected:
+            send({"type": "progress", "id": job, "percent": min(95, int(state["done"] / expected * 95)), "label": "downloading video and audio"})
+        else:
+            send({"type": "progress", "id": job, "downloaded": state["done"], "total": 0})
+
+    try:
+        fetch_to_file(request["video"], video_file, request.get("videoChunkParam"), referer, on_bytes)
+        fetch_to_file(request["audio"], audio_file, request.get("audioChunkParam"), referer, on_bytes)
+
+        send({"type": "progress", "id": job, "stage": "Merging…"})
+        proc = subprocess.run(
+            [FFMPEG, "-hide_banner", "-loglevel", "error", "-y", "-i", video_file, "-i", audio_file,
+             "-map", "0:v:0", "-map", "1:a:0", "-c", "copy", "-movflags", "+faststart", partial],
+            capture_output=True, text=True,
+        )
+        if proc.returncode != 0 or not os.path.exists(partial):
+            raise RuntimeError(last_error(proc.stderr) if proc.stderr.strip() else "ffmpeg failed")
+        os.replace(partial, target)
+        send({"type": "done", "id": job, "file": target})
+    except urllib.error.HTTPError as e:
+        send({"type": "failed", "id": job, "error": f"Server returned {e.code} {e.reason}"})
+    except Exception as e:  # network errors, disk errors, ffmpeg errors
+        send({"type": "failed", "id": job, "error": str(e) or e.__class__.__name__})
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
 
 def main():
