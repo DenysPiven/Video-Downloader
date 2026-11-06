@@ -10,6 +10,7 @@ A Chrome extension that finds videos in your open tabs and downloads them. Every
 - **Skip duplicates.** With **Skip files already downloaded** on (default, in settings), files already downloaded to the same path are skipped, so re-running a series only fetches what's missing.
 - **Chunked players.** Players that load a file in pieces with the byte range in the URL (`?bytes=0-131071`) are detected as one whole file.
 - **Progress in the popup.** Running and finished downloads are listed at the top of the popup, with the source site for each.
+- **yt-dlp helper (optional).** For sites whose player can't be saved from the browser (separate video and audio streams, signed URLs), the popup asks a local yt-dlp about the current tab and offers its qualities, including audio only. One click downloads and merges the best streams into `.mp4`.
 - **HLS.** Streams are downloaded segment by segment in the background and joined into one file: `.mp4` for fMP4 streams, `.ts` for classic ones.
 
 Everything runs inside Chrome, so your site logins and any browser VPN keep working.
@@ -20,6 +21,14 @@ Everything runs inside Chrome, so your site logins and any browser VPN keep work
 2. Open `chrome://extensions` and turn on **Developer mode** in the top-right corner.
 3. Click **Load unpacked** and select the repository folder.
 4. Pin the extension icon to the toolbar.
+
+## yt-dlp helper (optional)
+
+1. Install the tools: `brew install yt-dlp ffmpeg` (keep yt-dlp fresh with `brew upgrade yt-dlp`).
+2. Copy the extension ID from `chrome://extensions`.
+3. Run `./native-host/install.sh <extension-id>` and reload the extension.
+
+The helper saves into the Downloads folder (a folder picked in settings only exposes a handle, not a path). It downloads what yt-dlp can access; respect each site's terms.
 
 ## Usage
 
@@ -32,7 +41,7 @@ If a page was open before the extension was installed, reload it.
 ## Limitations
 
 - Does not download encrypted or DRM-protected streams and does not bypass protection.
-- Players that stream video and audio as separate byte-range chunks (MSE/DASH) are not supported.
+- Players that stream video and audio as separate byte-range chunks (MSE/DASH) need the yt-dlp helper.
 - If an HLS stream carries audio as a separate track, the saved file may have no sound.
 - HLS streams are joined in memory before saving, so very long streams (several GB) may not fit.
 - For a picked folder, Chrome may ask to allow access again after a restart; the popup shows an **Allow** button when that happens.
@@ -51,6 +60,7 @@ Only download content you have access to and are allowed to save.
 | `settings.js`, `store.js` | Shared settings and the saved folder handle |
 | `offscreen.html`, `offscreen.js` | HLS joining and writing into a picked folder |
 | `hls-parse.js` | HLS playlist parsing |
+| `native-host/` | Optional yt-dlp helper (native messaging host and installer) |
 | `util.js`, `style.css` | Helpers and styles |
 | `icons/` | Logo and toolbar icons |
 | `fonts/` | Space Grotesk (SIL Open Font License, see `fonts/OFL.txt`) |

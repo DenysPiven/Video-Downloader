@@ -1,5 +1,8 @@
 import { safeName, extFromUrl, formatSize } from "./util.js";
-import { loadSettings, cleanFolder, folderLabel } from "./settings.js";
+import { loadSettings, cleanFolder, folderLabel, DEFAULTS } from "./settings.js";
+
+const DEFAULT_SUBFOLDER = DEFAULTS.subfolder;
+const NATIVE_HOST = "com.video_downloader.host";
 import { folderAccess } from "./store.js";
 
 const $ = (id) => document.getElementById(id);
@@ -57,7 +60,7 @@ function finalNames() {
     const count = (used.get(base) || 0) + 1;
     used.set(base, count);
     if (count > 1) base = `${base} ${count}`;
-    out.set(it, it.kind === "hls" ? base : `${base}.${it.ext}`); // HLS extension is known after parsing
+    out.set(it, it.kind === "file" ? `${base}.${it.ext}` : base); // HLS and yt-dlp pick the extension later
   }
   return out;
 }
@@ -65,7 +68,7 @@ function finalNames() {
 function refreshNames() {
   const names = finalNames();
   for (const it of items) {
-    it.nameEl.textContent = it.kind === "hls" ? `${names.get(it)}.mp4` : names.get(it);
+    it.nameEl.textContent = it.kind === "file" ? names.get(it) : `${names.get(it)}.${it.ext || "mp4"}`;
     it.nameEl.title = it.getUrl();
   }
 }
@@ -265,6 +268,66 @@ function renderEmpty() {
   ]));
 }
 
+// ---------- yt-dlp helper ----------
+// For pages whose player can't be saved from the browser, a local yt-dlp (see
+// native-host/) reads the page URL and offers the available qualities.
+
+async function helperInfo(url) {
+  if (!/^https?:/.test(url || "")) return null;
+  const key = `helper_${url}`;
+  const cached = (await chrome.storage.session.get(key))[key];
+  if (cached) return cached;
+  try {
+    const info = await chrome.runtime.sendNativeMessage(NATIVE_HOST, { type: "info", url });
+    if (info?.qualities?.length || info?.error) chrome.storage.session.set({ [key]: info });
+    return info;
+  } catch (e) {
+    return { missing: /not found|forbidden/i.test(e.message), error: e.message };
+  }
+}
+
+function renderHelper(tab, info) {
+  const host = new URL(tab.url).hostname.replace(/^www\./, "");
+  const title = info.title || cleanTitle(tab.title, host);
+  const select = el("select", { title: "Quality" });
+  for (const q of info.qualities) {
+    select.append(el("option", { value: String(q.height), textContent: [`${q.height}p`, q.size ? formatSize(q.size) : null].filter(Boolean).join(" · ") }));
+  }
+  select.append(el("option", { value: "0", textContent: ["Audio only", info.audioSize ? formatSize(info.audioSize) : null].filter(Boolean).join(" · ") }));
+
+  const checkbox = el("input", { type: "checkbox", checked: true });
+  checkbox.addEventListener("change", updateButton);
+  const nameEl = el("div", { className: "name" });
+  const detail = [info.duration ? formatDuration(info.duration) : null, "via yt-dlp"].filter(Boolean).join(" · ");
+  const text = el("div", { className: "row-text" }, [nameEl, el("div", { className: "detail", textContent: detail })]);
+  text.addEventListener("click", () => { checkbox.checked = !checkbox.checked; updateButton(); });
+
+  const icon = el("img", { className: "favicon", width: 16, height: 16, alt: "" });
+  icon.addEventListener("error", () => icon.replaceWith(el("span", { className: "favicon letter", textContent: host[0]?.toUpperCase() || "?" })));
+  icon.src = chrome.runtime.getURL(`/_favicon/?pageUrl=${encodeURIComponent(tab.url)}&size=32`);
+
+  const box = el("section", {}, [
+    el("div", { className: "site" }, [icon, el("div", { className: "site-text" }, [
+      el("div", { className: "site-host", textContent: host }),
+      el("div", { className: "site-title", textContent: "This page, via yt-dlp" }),
+    ])]),
+    el("div", { className: "row" }, [checkbox, text, select]),
+  ]);
+  $("list").prepend(box);
+
+  const it = { checkbox, nameEl, kind: "ytdlp", ext: "mp4", site: host, title, getUrl: () => tab.url, getHeight: () => Number(select.value) };
+  select.addEventListener("change", () => { it.ext = it.getHeight() ? "mp4" : "m4a"; refreshNames(); });
+  items.unshift(it);
+}
+
+function renderHelperHint() {
+  $("list").append(el("div", { className: "note helper-hint" }, [
+    "Some sites need the yt-dlp helper. Install it with ",
+    el("code", { textContent: "native-host/install.sh" }),
+    " (see README).",
+  ]));
+}
+
 // ---------- Rendering: downloads ----------
 
 let jobs = [];
@@ -317,14 +380,25 @@ async function scan() {
   updateButton();
   setStatus("Looking for videos…");
 
+  const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const helper = active ? helperInfo(active.url) : Promise.resolve(null);
+
   const groups = await collect();
   setStatus("Reading video info…");
   await Promise.all(groups.flatMap((g) => g.entries.filter((e) => e.kind === "file").map(async (e) => { e.meta = await probe(e.url); })));
   groups.forEach(renderGroup);
   refreshNames();
+  const found = items.length;
+
+  setStatus("Checking the page with yt-dlp…");
+  const info = await helper;
+  if (info?.qualities) renderHelper(active, info);
+  else if (info?.missing && !found) renderHelperHint();
+  refreshNames();
 
   if (!items.length) renderEmpty();
-  setStatus(items.length ? `${items.length} video${items.length === 1 ? "" : "s"} in ${groups.length} tab${groups.length === 1 ? "" : "s"}` : "");
+  const tabs = groups.length + (info?.qualities && !groups.some((g) => g.tab.id === active.id) ? 1 : 0);
+  setStatus(items.length ? `${items.length} video${items.length === 1 ? "" : "s"} in ${tabs} tab${tabs === 1 ? "" : "s"}` : "");
   updateButton();
 }
 
@@ -335,8 +409,19 @@ async function downloadSelected() {
   await renderFolder();
   const toFolder = settings.folderMode === "custom";
   const folder = cleanFolder(settings.subfolder);
+  const { downloadsRoot } = await chrome.storage.local.get("downloadsRoot");
+  // yt-dlp needs a real path; a picked folder only exposes a handle, so it saves into Downloads.
+  const helperDir = `${downloadsRoot || "~/Downloads"}/${toFolder ? cleanFolder(DEFAULT_SUBFOLDER) : folder}`.replace(/\/$/, "");
   const batch = picked.map((it) => {
     const name = names.get(it);
+    if (it.kind === "ytdlp") {
+      return {
+        id: crypto.randomUUID(), url: it.getUrl(), kind: "ytdlp", target: "ytdlp",
+        name: `${name}.${it.getHeight() ? "mp4" : "m4a"}`, fileName: name, height: it.getHeight(), dir: helperDir,
+        path: helperDir, site: it.site, skip: settings.skip,
+        note: toFolder ? "yt-dlp saves into Downloads" : "",
+      };
+    }
     return {
       id: crypto.randomUUID(),
       url: it.getUrl(),

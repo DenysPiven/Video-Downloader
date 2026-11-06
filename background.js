@@ -144,6 +144,14 @@ async function alreadyDownloaded(path) {
 
 async function startJob(job) {
   try {
+    if (job.target === "ytdlp") {
+      await updateJob(job.id, { state: "active", text: "Starting yt-dlp…" });
+      nativePort().postMessage({
+        type: "download", id: job.id, url: job.url, height: job.height, dir: job.dir, name: job.fileName, skip: job.skip,
+      });
+      return;
+    }
+
     if (job.target === "folder") {
       await updateJob(job.id, { state: "active", text: "Starting…" });
       await ensureOffscreen();
@@ -215,6 +223,58 @@ chrome.downloads.onChanged.addListener(async (delta) => {
     chrome.runtime.sendMessage({ target: "offscreen", type: "revoke", blobUrl: job.blobUrl }).catch(() => {});
   }
 });
+
+// ---------- yt-dlp helper (native messaging) ----------
+
+const NATIVE_HOST = "com.video_downloader.host";
+let port = null;
+const lastProgressAt = new Map();
+
+function formatBytes(bytes) {
+  const mb = bytes / (1024 * 1024);
+  return mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${mb.toFixed(mb < 10 ? 1 : 0)} MB`;
+}
+
+async function activeHelperJobs() {
+  const { jobs = [] } = await chrome.storage.session.get("jobs");
+  return jobs.filter((j) => j.target === "ytdlp" && (j.state === "active" || j.state === "queued"));
+}
+
+function nativePort() {
+  if (port) return port;
+  port = chrome.runtime.connectNative(NATIVE_HOST);
+  port.onMessage.addListener(onHelperMessage);
+  port.onDisconnect.addListener(async () => {
+    const reason = chrome.runtime.lastError?.message || "The yt-dlp helper stopped";
+    port = null;
+    for (const j of await activeHelperJobs()) {
+      await updateJob(j.id, { state: "failed", text: /not found/i.test(reason) ? "yt-dlp helper is not installed" : reason });
+    }
+  });
+  return port;
+}
+
+async function onHelperMessage(msg) {
+  if (msg.type === "progress") {
+    if (msg.stage) return updateJob(msg.id, { text: msg.stage });
+    const now = Date.now();
+    if (now - (lastProgressAt.get(msg.id) || 0) < 400) return; // yt-dlp reports very often
+    lastProgressAt.set(msg.id, now);
+    const total = msg.total || 0;
+    const part = msg.part > 1 ? " · audio" : "";
+    return updateJob(msg.id, {
+      text: total ? `${Math.floor((msg.downloaded / total) * 100)}% · ${formatBytes(msg.downloaded)} of ${formatBytes(total)}${part}` : `${formatBytes(msg.downloaded)}${part}`,
+      progress: total ? msg.downloaded / total : 0,
+    });
+  }
+  if (msg.type === "done") await updateJob(msg.id, { state: "done", text: "Done", progress: 1 });
+  if (msg.type === "skipped") await updateJob(msg.id, { state: "skipped", text: "Already downloaded", progress: 1 });
+  if (msg.type === "failed") await updateJob(msg.id, { state: "failed", text: msg.error });
+  if (msg.type !== "progress") {
+    lastProgressAt.delete(msg.id);
+    if (port && !(await activeHelperJobs()).length) { port.disconnect(); port = null; }
+  }
+}
 
 // ---------- Offscreen document (HLS joining, writing to a chosen folder) ----------
 
