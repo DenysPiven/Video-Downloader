@@ -116,8 +116,11 @@ async function scanPage(tabId) {
   }
 }
 
+// "Episode 2" before "Episode 10": numbers inside titles compare by value.
+const naturalOrder = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+const hostOf = (tab) => new URL(tab.url).hostname.replace(/^www\./, "");
+
 async function collect() {
-  const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
   const tabs = (await chrome.tabs.query({})).filter((t) => /^https?:/.test(t.url || ""));
   const stored = await chrome.storage.session.get(null);
 
@@ -131,7 +134,7 @@ async function collect() {
 
   return groups
     .filter((g) => g.entries.length)
-    .sort((a, b) => (b.tab.id === active?.id) - (a.tab.id === active?.id) || a.tab.windowId - b.tab.windowId || a.tab.index - b.tab.index);
+    .sort((a, b) => naturalOrder.compare(hostOf(a.tab), hostOf(b.tab)) || naturalOrder.compare(a.tab.title || "", b.tab.title || ""));
 }
 
 // ---------- Qualities ----------
