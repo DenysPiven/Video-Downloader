@@ -5,7 +5,7 @@ A Chrome extension that finds videos in your open tabs and downloads them. Every
 ## Features
 
 - **Any site, every tab.** Watches which video files (MP4, WebM, MOV, MKV) and HLS streams (`.m3u8`) each tab loads, and also picks up `<video>` elements. The popup lists videos from all open tabs, grouped by site, with the most likely video in each tab pre-selected. The toolbar badge shows how many videos a tab has.
-- **Folder.** Files go to `Downloads/Video Downloader` by default; type any other subfolder of Downloads in the popup. Files are named after the page title.
+- **Folder picker.** Files go to `Downloads/Video Downloader` by default. Click the folder in the popup to pick another one: Downloads itself, recently used folders, folders that already hold downloads, or a new folder. **Ask where to save each time** opens the standard Save dialog for any location. The button next to it reveals the folder in Finder. Files are named after the page title.
 - **Quality choice.** The popup reads each file's resolution and duration. Files of one video in different qualities are merged into one row with a quality selector (best first), e.g. `1080p · 459 MB`, `720p · 219 MB`.
 - **Skip duplicates.** With **Skip files already downloaded** on (default), files already downloaded to the same path are skipped, so re-running a series only fetches what's missing.
 - **Chunked players.** Players that load a file in pieces with the byte range in the URL (`?bytes=0-131071`) are detected as one whole file.
@@ -24,7 +24,7 @@ Everything runs inside Chrome, so your site logins and any browser VPN keep work
 ## Usage
 
 1. Open the pages with videos (as many tabs as you like) and start playing each one so the player begins loading.
-2. Click the extension icon, check the videos you want, and change the folder if needed.
+2. Click the extension icon, check the videos you want, pick the quality and the folder if needed.
 3. Click **Download**. Progress shows up in the popup and in Chrome's downloads.
 
 If a page was open before the extension was installed, reload it.
@@ -35,7 +35,7 @@ If a page was open before the extension was installed, reload it.
 - Players that stream video and audio as separate byte-range chunks (MSE/DASH) are not supported.
 - If an HLS stream carries audio as a separate track, the saved file may have no sound.
 - HLS streams are joined in memory before saving, so very long streams (several GB) may not fit.
-- Files can only go inside the Downloads folder (a Chrome restriction).
+- Outside **Ask where to save each time**, files can only go inside the Downloads folder (a Chrome restriction).
 - `.ts` files play in VLC or IINA. To convert to `.mp4`: `ffmpeg -i video.ts -c copy video.mp4`.
 
 Only download content you have access to and are allowed to save.

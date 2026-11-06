@@ -1,6 +1,7 @@
 import { safeName, extFromUrl, formatSize } from "./util.js";
 
-const DEFAULTS = { subfolder: "Video Downloader", skip: true };
+const DEFAULTS = { subfolder: "Video Downloader", skip: true, askEach: false, recentFolders: [] };
+const MAX_RECENT = 8;
 const OLD_DEFAULT_FOLDER = "video-downloader";
 const $ = (id) => document.getElementById(id);
 
@@ -23,8 +24,8 @@ function el(tag, props = {}, children = []) {
 async function loadSettings() {
   settings = { ...DEFAULTS, ...(await chrome.storage.local.get(Object.keys(DEFAULTS))) };
   if (settings.subfolder === OLD_DEFAULT_FOLDER) saveSetting("subfolder", DEFAULTS.subfolder);
-  $("folder").value = settings.subfolder;
   $("skip").checked = settings.skip;
+  renderFolderButton();
 }
 
 function saveSetting(key, value) {
@@ -39,6 +40,83 @@ function cleanFolder(s) {
     .map((p) => safeName(p, ""))
     .filter((p) => p && p !== "." && p !== "..")
     .join("/");
+}
+
+// ---------- Folder picker ----------
+
+const folderLabel = (folder) => (folder ? `Downloads/${folder}` : "Downloads");
+
+function renderFolderButton() {
+  $("folder-name").textContent = settings.askEach ? "Ask every time" : folderLabel(cleanFolder(settings.subfolder));
+}
+
+function rememberFolder(folder) {
+  const recent = [folder, ...settings.recentFolders.filter((f) => f !== folder)].slice(0, MAX_RECENT);
+  saveSetting("recentFolders", recent);
+}
+
+function chooseFolder(folder) {
+  saveSetting("subfolder", folder);
+  saveSetting("askEach", false);
+  rememberFolder(folder);
+  renderFolderButton();
+  toggleFolderMenu(false);
+}
+
+// Subfolders of Downloads that already hold downloads, newest first.
+async function foldersFromHistory() {
+  const { downloadsRoot } = await chrome.storage.local.get("downloadsRoot");
+  if (!downloadsRoot) return [];
+  const root = `${downloadsRoot.replace(/\\/g, "/")}/`;
+  const found = await chrome.downloads.search({ orderBy: ["-startTime"], limit: 300, exists: true, state: "complete" });
+  const out = [];
+  for (const d of found) {
+    const file = (d.filename || "").replace(/\\/g, "/");
+    if (!file.startsWith(root)) continue;
+    const rel = file.slice(root.length);
+    const dir = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "";
+    if (dir && !out.includes(dir)) out.push(dir);
+  }
+  return out;
+}
+
+async function renderFolderMenu() {
+  const current = settings.askEach ? null : cleanFolder(settings.subfolder);
+  const folders = [];
+  for (const f of [DEFAULTS.subfolder, ...settings.recentFolders, ...(await foldersFromHistory())]) {
+    if (f && !folders.includes(f)) folders.push(f);
+  }
+  if (current && !folders.includes(current)) folders.unshift(current);
+
+  const item = (folder) => {
+    const b = el("button", { type: "button", className: `menu-item${folder === current ? " current" : ""}`, role: "option" }, [
+      el("span", { className: "mi-text", textContent: folderLabel(folder), title: folderLabel(folder) }),
+    ]);
+    b.addEventListener("click", () => chooseFolder(folder));
+    return b;
+  };
+  $("folder-list").replaceChildren(item(""), ...folders.map(item), el("div", { className: "menu-sep" }));
+  $("ask-each").classList.toggle("current", settings.askEach);
+}
+
+async function toggleFolderMenu(open = $("folder-menu").hidden) {
+  if (open) await renderFolderMenu();
+  $("folder-menu").hidden = !open;
+  $("folder-btn").setAttribute("aria-expanded", String(open));
+}
+
+// Reveals the last file saved in the current folder, or Downloads itself.
+async function openFolder() {
+  const folder = cleanFolder(settings.subfolder);
+  if (folder && !settings.askEach) {
+    const sep = "[\\\\/]";
+    const [last] = await chrome.downloads.search({
+      filenameRegex: `${sep}${escapeRe(folder).replace(/\//g, sep)}${sep}[^\\\\/]+$`,
+      orderBy: ["-startTime"], limit: 1, exists: true, state: "complete",
+    });
+    if (last) return chrome.downloads.show(last.id);
+  }
+  chrome.downloads.showDefaultFolder();
 }
 
 // ---------- Naming ----------
@@ -351,19 +429,29 @@ async function downloadSelected() {
       name: it.kind === "hls" ? `${name}.mp4` : name,
       path: folder ? `${folder}/${name}` : name,
       site: it.site,
-      saveAs: false,
+      saveAs: settings.askEach,
       skip: settings.skip,
     };
   });
   $("download").disabled = true;
+  if (!settings.askEach) rememberFolder(folder);
   await chrome.runtime.sendMessage({ type: "enqueue", items: batch });
   for (const it of picked) it.checkbox.checked = false;
   updateButton();
 }
 
-$("folder").addEventListener("input", (e) => saveSetting("subfolder", e.target.value));
 $("skip").addEventListener("change", (e) => saveSetting("skip", e.target.checked));
-$("folder").addEventListener("change", (e) => { e.target.value = cleanFolder(e.target.value); saveSetting("subfolder", e.target.value); });
+$("folder-btn").addEventListener("click", () => toggleFolderMenu());
+$("open-folder").addEventListener("click", openFolder);
+$("ask-each").addEventListener("click", () => { saveSetting("askEach", true); renderFolderButton(); toggleFolderMenu(false); });
+$("new-folder").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const folder = cleanFolder($("new-folder-input").value);
+  if (!folder) return;
+  $("new-folder-input").value = "";
+  chooseFolder(folder);
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("folder-menu").hidden) { e.preventDefault(); toggleFolderMenu(false); } });
 $("refresh").addEventListener("click", scan);
 $("download").addEventListener("click", downloadSelected);
 $("clear").addEventListener("click", () => chrome.runtime.sendMessage({ type: "clear-finished" }));

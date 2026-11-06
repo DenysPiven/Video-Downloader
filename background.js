@@ -173,6 +173,21 @@ async function enqueue(items) {
   for (const job of fresh) await startJob(job);
 }
 
+// Learns the absolute Downloads folder from a finished download whose relative
+// path we chose, so the popup can list existing subfolders from the history.
+async function rememberDownloadsRoot(downloadId, job) {
+  if (job.saveAs) return;
+  const [d] = await chrome.downloads.search({ id: downloadId });
+  if (!d?.filename) return;
+  const file = d.filename.replace(/\\/g, "/");
+  const rel = job.path.replace(/\\/g, "/");
+  const relDir = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/") + 1) : "";
+  const dir = file.slice(0, file.lastIndexOf("/") + 1);
+  if (relDir && !dir.endsWith(relDir)) return;
+  const root = dir.slice(0, dir.length - relDir.length).replace(/\/$/, "");
+  if (root) await chrome.storage.local.set({ downloadsRoot: root });
+}
+
 // File downloads report through chrome.downloads; HLS blobs too (with blobUrl).
 chrome.downloads.onChanged.addListener(async (delta) => {
   if (!delta.state && !delta.error) return;
@@ -181,6 +196,7 @@ chrome.downloads.onChanged.addListener(async (delta) => {
   if (!job) return;
   if (delta.state?.current === "complete") {
     await updateJob(job.id, { state: "done", text: "Done", progress: 1 });
+    rememberDownloadsRoot(delta.id, job);
   } else if (delta.state?.current === "interrupted" || delta.error) {
     const reason = delta.error?.current || "interrupted";
     await updateJob(job.id, { state: "failed", text: reason === "USER_CANCELED" ? "Canceled" : `Failed (${reason})` });
