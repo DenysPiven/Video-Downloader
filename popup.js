@@ -4,6 +4,7 @@ import { loadSettings, cleanFolder, folderLabel, DEFAULTS } from "./settings.js"
 const DEFAULT_SUBFOLDER = DEFAULTS.subfolder;
 const NATIVE_HOST = "com.video_downloader.host";
 import { folderAccess } from "./store.js";
+import { probeAudio } from "./mp4-audio.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -170,7 +171,9 @@ function buildVideos(entries) {
     }
   }
   for (const v of videos) {
-    v.variants.sort((a, b) => (b.meta?.height || 0) - (a.meta?.height || 0) || (b.size || 0) - (a.size || 0));
+    // Files known to be silent (video-only DASH tracks) go last, whatever their resolution.
+    const silent = (e) => (e.audio === false ? 1 : 0);
+    v.variants.sort((a, b) => silent(a) - silent(b) || (b.meta?.height || 0) - (a.meta?.height || 0) || (b.size || 0) - (a.size || 0));
   }
   return videos;
 }
@@ -186,7 +189,8 @@ function pickDefault(videos) {
 }
 
 function qualityLabel(e) {
-  return [e.meta?.height ? `${e.meta.height}p` : null, e.size ? formatSize(e.size) : null].filter(Boolean).join(" · ") || "Unknown quality";
+  return [e.meta?.height ? `${e.meta.height}p` : null, e.size ? formatSize(e.size) : null, e.audio === false ? "no audio" : null]
+    .filter(Boolean).join(" · ") || "Unknown quality";
 }
 
 function formatDuration(sec) {
@@ -388,7 +392,9 @@ async function scan() {
 
   const groups = await collect();
   setStatus("Reading video info…");
-  await Promise.all(groups.flatMap((g) => g.entries.filter((e) => e.kind === "file").map(async (e) => { e.meta = await probe(e.url); })));
+  await Promise.all(groups.flatMap((g) => g.entries.filter((e) => e.kind === "file").map(async (e) => {
+    [e.meta, e.audio] = await Promise.all([probe(e.url), withTimeout(probeAudio(e.url), PROBE_TIMEOUT_MS, null)]);
+  })));
   groups.forEach(renderGroup);
   refreshNames();
   const found = items.length;
