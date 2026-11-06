@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <title>Video Saver</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    body { width: 440px; max-height: 580px; }
+    header { position: sticky; top: 0; z-index: 1; background: var(--bg); padding: 12px 14px; border-bottom: 1px solid var(--line); display: flex; gap: 8px; align-items: center; }
+    header h1 { font-size: 14px; margin: 0; flex: 1; }
+    #status { padding: 8px 14px; color: var(--muted); }
+    section { padding: 10px 14px; border-bottom: 1px solid var(--line); }
+    section h2 { font-size: 13px; margin: 0 0 6px; }
+    section h3 { font-size: 12px; margin: 8px 0 4px; color: var(--muted); font-weight: 600; }
+    .note { color: var(--muted); }
+    .row { display: flex; gap: 8px; align-items: center; padding: 3px 0; }
+    .row label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tag { font-size: 11px; padding: 1px 5px; border-radius: 4px; background: var(--line); color: var(--fg); }
+    .meta { color: var(--muted); font-size: 12px; white-space: nowrap; }
+    .state { min-width: 64px; text-align: right; color: var(--muted); font-size: 12px; }
+    .state.ok { color: var(--ok); } .state.err { color: var(--err); }
+    select { font: inherit; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Video Saver</h1>
+    <button id="refresh" class="secondary">Оновити</button>
+    <button id="download" disabled>Скачати</button>
+  </header>
+  <div id="status">Шукаю відео…</div>
+  <main id="list"></main>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
